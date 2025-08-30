@@ -1,0 +1,9 @@
+[package]
+name = "gemini-file-viewer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = "0.31.0"
+rfd = "0.14.1"
+image = { version = "0.25.1", features = ["png", "jpeg"] }
