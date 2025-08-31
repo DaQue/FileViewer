@@ -422,6 +422,8 @@ impl eframe::App for FileViewerApp {
                 if matches!(self.content, Some(Content::Image(_))) {
                     ui.separator();
                     ui.checkbox(&mut self.image_fit, "Fit to Window");
+                    if ui.button("Zoom -").clicked() { self.image_fit = false; self.image_zoom = (self.image_zoom / 1.10).clamp(0.1, 6.0); }
+                    if ui.button("Zoom +").clicked() { self.image_fit = false; self.image_zoom = (self.image_zoom * 1.10).clamp(0.1, 6.0); }
                     if ui.button("100%").clicked() {
                         self.image_fit = false;
                         self.image_zoom = 1.0;
@@ -489,9 +491,14 @@ impl eframe::App for FileViewerApp {
                     Some(Content::Image(texture)) => {
                         let size = texture.size();
                         ui.label(format!("Image: {}x{} px", size[0], size[1]));
-                        ui.label(format!("Zoom: {:.0}%", self.image_zoom * 100.0));
+                        let eff = if self.image_fit {
+                            // best-effort: approximate using window size if available later
+                            None
+                        } else { Some(self.image_zoom) };
+                        if let Some(z) = eff { ui.label(format!("Zoom: {:.0}%", z * 100.0)); }
                         let est = (size[0] as usize).saturating_mul(size[1] as usize).saturating_mul(4);
                         ui.label(format!("Texture ~{:.1} MB", est as f64 / (1024.0 * 1024.0)));
+                        if self.image_fit { ui.label("Fit: on"); }
                     }
                     Some(Content::Text(_)) => {
                         ui.label(format!("Lines: {}", self.text_line_count));
@@ -551,22 +558,31 @@ impl eframe::App for FileViewerApp {
                         });
                     }
                     Content::Image(texture) => {
+                        let viewport = ui.available_size();
                         egui::ScrollArea::both().show(ui, |ui| {
-                            ui.vertical_centered(|ui| {
+                            ui.centered_and_justified(|ui| {
                                 let size = texture.size();
                                 let mut effective_zoom = self.image_zoom;
                                 if self.image_fit {
-                                        // Use clipped viewport size for more accurate fit in scroll area
-                                    let avail = ui.clip_rect().size();
-                                    let sx = if size[0] > 0 { avail.x / size[0] as f32 } else { 1.0 };
-                                    let sy = if size[1] > 0 { avail.y / size[1] as f32 } else { 1.0 };
+                                    // Use the outer viewport size captured before the ScrollArea
+                                    let sx = if size[0] > 0 { viewport.x / size[0] as f32 } else { 1.0 };
+                                    let sy = if size[1] > 0 { viewport.y / size[1] as f32 } else { 1.0 };
                                     let fit = sx.min(sy);
                                     if fit.is_finite() && fit > 0.0 {
                                         effective_zoom = fit.clamp(0.1, 6.0);
                                     }
                                 }
                                 let desired = egui::vec2(size[0] as f32 * effective_zoom, size[1] as f32 * effective_zoom);
-                                ui.add_sized(desired, egui::Image::new(texture));
+                                let image = egui::Image::new(texture).fit_to_exact_size(desired);
+                                let resp = ui.add(image);
+                                if resp.hovered() {
+                                    let scroll = ui.input(|i| i.raw_scroll_delta.y);
+                                    if scroll != 0.0 {
+                                        self.image_fit = false;
+                                        let factor = if scroll > 0.0 { 1.10 } else { 1.0 / 1.10 };
+                                        self.image_zoom = (self.image_zoom * factor).clamp(0.1, 6.0);
+                                    }
+                                }
                             });
                         });
                     }
