@@ -37,7 +37,7 @@ async function handleOpenInfo(info) {
     fitChk.checked = false;
     imgEl.style.transform = `scale(${imageZoom})`;
     imgEl.src = info.path;
-    statusEl.textContent = `${info.path}`;
+    updateImageStatus();
     addRecent(info.path);
   }
 }
@@ -53,6 +53,7 @@ function updateImageTransform() {
   } else {
     imgEl.style.transform = `scale(${imageZoom})`;
   }
+  updateImageStatus();
 }
 
 fitChk.addEventListener('change', () => updateImageTransform());
@@ -179,3 +180,18 @@ recentSel.addEventListener('change', async () => {
 // Init
 refreshRecents();
 window.addEventListener('resize', updateImageTransform);
+
+function updateImageStatus() {
+  if (imgEl.classList.contains(''hidden'')) return;
+  const path = currentPath || '';
+  const natW = imgEl.naturalWidth || 0;
+  const natH = imgEl.naturalHeight || 0;
+  let eff = imageZoom;
+  if (fitChk.checked && natW && natH) {
+    const cw = document.getElementById(''content'').clientWidth;
+    const ch = document.getElementById(''content'').clientHeight;
+    const sx = cw / natW; const sy = ch / natH; eff = Math.max(0.1, Math.min(6.0, Math.min(sx, sy)));
+  }
+  const fitNote = fitChk.checked ? ' Fit: on' : '';
+  statusEl.textContent = `${path} — ${natW}x${natH} px — Zoom: ${(eff*100).toFixed(0)}%${fitNote}`;
+}

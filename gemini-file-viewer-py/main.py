@@ -121,6 +121,7 @@ class MainWindow(QtWidgets.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+0"), self, activated=self.reset_zoom)
 
         self.text.installEventFilter(self)
+        self.image.installEventFilter(self)
 
     def eventFilter(self, obj, ev):
         if obj is self.image and ev.type() == QtCore.QEvent.Wheel:
@@ -129,6 +130,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.image.fit_to_window = False
                 self.image.zoom = max(0.1, min(6.0, self.image.zoom * (1.1 if delta > 0 else 1/1.1)))
                 self.image.update()
+                self._update_image_status()
                 return True
         if obj is self.text and ev.type() == QtCore.QEvent.Wheel and (QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ControlModifier):
             delta = ev.angleDelta().y()
@@ -155,6 +157,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def toggle_fit(self, state):
         self.image.fit_to_window = bool(state)
         self.image.update()
+        self._update_image_status()
 
     def zoom_image(self, factor: float):
         if not self.image.isVisible():
@@ -163,6 +166,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_fit.setChecked(False)
         self.image.zoom = max(0.1, min(6.0, self.image.zoom * factor))
         self.image.update()
+        self._update_image_status()
 
     def reset_zoom(self):
         if self.image.isVisible():
@@ -170,6 +174,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.chk_fit.setChecked(False)
             self.image.zoom = 1.0
             self.image.update()
+            self._update_image_status()
         else:
             self.text_zoom = 1.0
             self.text.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
@@ -192,7 +197,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.image.set_image(pix)
                 self.text.hide()
                 self.image.show()
-                self.status.showMessage(f"{path} — {pix.width()}x{pix.height()} px")
+                self._update_image_status()
             else:
                 with open(path, "rb") as f:
                     data = f.read()
@@ -249,6 +254,30 @@ class MainWindow(QtWidgets.QMainWindow):
         text = self.text.toPlainText()
         cnt = text.count(needle)
         self.find_count.setText(f"{cnt} match(es)")
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._update_image_status()
+
+    def _effective_image_zoom(self) -> float:
+        if not self.image._pix:
+            return 1.0
+        if self.image.fit_to_window:
+            avail = self.image.contentsRect().size()
+            w = self.image._pix.width() or 1
+            h = self.image._pix.height() or 1
+            sx = avail.width() / w
+            sy = avail.height() / h
+            return max(0.1, min(6.0, min(sx, sy)))
+        return self.image.zoom
+
+    def _update_image_status(self):
+        if not self.image.isVisible() or not self.image._pix:
+            return
+        pix = self.image._pix
+        eff = self._effective_image_zoom()
+        extra = " Fit: on" if self.image.fit_to_window else ""
+        self.status.showMessage(f"{self._current_path} — {pix.width()}x{pix.height()} px — Zoom: {eff*100:.0f}%{extra}")
 
     def _ensure_settings_dir(self):
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
