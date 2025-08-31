@@ -660,10 +660,14 @@ fn token_highlight(
     ];
 
     let keywords_rs: &[&str] = &[
-        "fn","let","struct","impl","pub","use","mod","match","if","else","loop","while","for","return","enum","const","static","trait","where","crate","super","Self","self","type","as","mut","ref","in","break","continue"
+        // Stable Rust keywords
+        "as","async","await","break","const","continue","crate","dyn","else","enum","extern","false","fn","for","if","impl","in","let","loop","match","mod","move","mut","pub","ref","return","self","Self","static","struct","super","trait","true","type","unsafe","use","where","while",
+        // Common future/reserved
+        "union","box","try","yield","macro","macro_rules"
     ];
     let keywords_py: &[&str] = &[
-        "def","class","import","from","as","if","elif","else","for","while","return","try","except","finally","with","pass","break","continue","lambda","global","nonlocal","assert","yield","raise","in","is","and","or","not","True","False","None"
+        // Python 3.11+ keywords
+        "False","None","True","and","as","assert","async","await","break","class","continue","def","del","elif","else","except","finally","for","from","global","if","import","in","is","lambda","nonlocal","not","or","pass","raise","return","try","while","with","yield","match","case"
     ];
 
     // Simple word tokenizer
@@ -678,7 +682,7 @@ fn token_highlight(
                     (kw_color, true)
                 } else if ext == "py" && keywords_py.contains(&buf.as_str()) {
                     (kw_color, true)
-                } else if lc == "true" || lc == "false" || lc == "null" { // json booleans
+                } else if lc == "true" || lc == "false" || lc == "null" || lc == "none" { // json/python null/booleans
                     (bool_color, true)
                 } else if buf.chars().all(|c| c.is_ascii_digit()) {
                     (num_color, true)
@@ -711,7 +715,7 @@ fn token_highlight(
             (kw_color, true)
         } else if ext == "py" && keywords_py.contains(&buf.as_str()) {
             (kw_color, true)
-        } else if lc == "true" || lc == "false" || lc == "null" {
+        } else if lc == "true" || lc == "false" || lc == "null" || lc == "none" {
             (bool_color, true)
         } else if buf.chars().all(|c| c.is_ascii_digit()) {
             (num_color, true)
