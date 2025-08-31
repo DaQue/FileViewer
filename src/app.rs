@@ -5,7 +5,6 @@ use egui::{text::LayoutJob, ColorImage, TextureHandle};
 use image::GenericImageView;
 use rfd::FileDialog;
 use std::{
-    collections::VecDeque,
     fs,
     path::{Path, PathBuf},
 };
@@ -141,12 +140,9 @@ impl eframe::App for FileViewerApp {
             ui.horizontal_wrapped(|ui| {
                 if ui.button("Open File…").clicked() {
                     if let Some(path) = FileDialog::new()
-                        .add_filter(
-                            "All Supported Files",
-                            &[
-                                "txt", "rs", "toml", "md", "json", "js", "html", "css", "png", "jpg", "jpeg", "gif", "bmp", "webp",
-                            ],
-                        )
+                        .add_filter("All Supported", &["txt","rs","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
+                        .add_filter("Images", &["png","jpg","jpeg","gif","bmp","webp"])
+                        .add_filter("Text/Source", &["txt","rs","toml","md","json","js","html","css"])
                         .pick_file()
                     {
                         file_to_load = Some(path);
@@ -154,16 +150,24 @@ impl eframe::App for FileViewerApp {
                 }
 
                 ui.menu_button("Recent Files", |ui| {
+                    ui.set_min_width(480.0);
+                    ui.style_mut().wrap = Some(false);
                     if self.recent_files.is_empty() {
                         ui.label("(empty)");
                     }
                     for file in self.recent_files.iter().rev().cloned() {
                         if let Some(file_name) = file.file_name() {
-                            if ui.button(file_name.to_string_lossy()).clicked() {
+                            let display = file.to_string_lossy();
+                            if ui.button(egui::RichText::new(display.clone()).monospace()).on_hover_text(file.to_string_lossy()).clicked() {
                                 file_to_load = Some(file);
                                 ui.close_menu();
                             }
                         }
+                    }
+                    ui.separator();
+                    if ui.button("Clear Recent Files").clicked() {
+                        self.recent_files.clear();
+                        ui.close_menu();
                     }
                 });
 
@@ -251,4 +255,3 @@ impl eframe::App for FileViewerApp {
         }
     }
 }
-
