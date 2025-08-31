@@ -651,6 +651,13 @@ fn token_highlight(
     let kw_color = egui::Color32::from_rgb(97, 175, 239); // blue-ish
     let num_color = egui::Color32::from_rgb(209, 154, 102); // orange-ish
     let bool_color = egui::Color32::from_rgb(198, 120, 221); // purple-ish
+    let bracket_colors = [
+        egui::Color32::from_rgb(152, 195, 121), // green
+        egui::Color32::from_rgb(224, 108, 117), // red
+        egui::Color32::from_rgb(97, 175, 239),  // blue
+        egui::Color32::from_rgb(229, 192, 123), // yellow
+        egui::Color32::from_rgb(86, 182, 194),  // cyan
+    ];
 
     let keywords_rs: &[&str] = &[
         "fn","let","struct","impl","pub","use","mod","match","if","else","loop","while","for","return","enum","const","static","trait","where","crate","super","Self","self","type","as","mut","ref","in","break","continue"
@@ -658,6 +665,7 @@ fn token_highlight(
 
     // Simple word tokenizer
     let mut buf = String::new();
+    let mut depth: i32 = 0;
     for ch in text.chars() {
         if ch.is_alphanumeric() || ch == '_' {
             buf.push(ch);
@@ -676,8 +684,21 @@ fn token_highlight(
                 append_with_search(job, &buf, font_id.clone(), color, query);
                 buf.clear();
             }
+            let color = match ch {
+                '(' | '[' | '{' => {
+                    let idx = (depth.max(0) as usize) % bracket_colors.len();
+                    depth = depth.saturating_add(1);
+                    Some(bracket_colors[idx])
+                }
+                ')' | ']' | '}' => {
+                    depth = depth.saturating_sub(1);
+                    let idx = (depth.max(0) as usize) % bracket_colors.len();
+                    Some(bracket_colors[idx])
+                }
+                _ => None,
+            };
             let delim = ch.to_string();
-            append_with_search(job, &delim, font_id.clone(), base_color, query);
+            append_with_search(job, &delim, font_id.clone(), color.unwrap_or(base_color), query);
         }
     }
     if !buf.is_empty() {
