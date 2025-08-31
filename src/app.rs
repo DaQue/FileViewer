@@ -643,6 +643,7 @@ fn token_highlight(
     base_color: egui::Color32,
     query: &str,
     do_syntax: bool,
+    depth: &mut i32,
 ) {
     if !do_syntax {
         append_with_search(job, text, font_id, base_color, query);
@@ -665,7 +666,6 @@ fn token_highlight(
 
     // Simple word tokenizer
     let mut buf = String::new();
-    let mut depth: i32 = 0;
     for ch in text.chars() {
         if ch.is_alphanumeric() || ch == '_' {
             buf.push(ch);
@@ -686,13 +686,13 @@ fn token_highlight(
             }
             let color = match ch {
                 '(' | '[' | '{' => {
-                    let idx = (depth.max(0) as usize) % bracket_colors.len();
-                    depth = depth.saturating_add(1);
+                    let idx = ((*depth).max(0) as usize) % bracket_colors.len();
+                    *depth = depth.saturating_add(1);
                     Some(bracket_colors[idx])
                 }
                 ')' | ']' | '}' => {
-                    depth = depth.saturating_sub(1);
-                    let idx = (depth.max(0) as usize) % bracket_colors.len();
+                    *depth = depth.saturating_sub(1);
+                    let idx = ((*depth).max(0) as usize) % bracket_colors.len();
                     Some(bracket_colors[idx])
                 }
                 _ => None,
@@ -740,13 +740,14 @@ fn append_highlighted(
     }
 
     let mut buf = String::new();
+    let mut depth: i32 = 0;
 
     // String literal coloring
     if do_syntax {
         let mut chars = line.chars().peekable();
         while let Some(ch) = chars.next() {
             if ch == '"' {
-                if !buf.is_empty() { token_highlight(job, &buf, ext, font_id.clone(), base_color, query, do_syntax); buf.clear(); }
+                if !buf.is_empty() { token_highlight(job, &buf, ext, font_id.clone(), base_color, query, do_syntax, &mut depth); buf.clear(); }
                 buf.clear();
                 let mut s = String::from('"');
                 while let Some(c2) = chars.next() {
@@ -764,6 +765,6 @@ fn append_highlighted(
 
     // Flush any remaining non-string content with token highlight
     if !buf.is_empty() {
-        token_highlight(job, &buf, ext, font_id, base_color, query, do_syntax);
+        token_highlight(job, &buf, ext, font_id, base_color, query, do_syntax, &mut depth);
     }
 }
