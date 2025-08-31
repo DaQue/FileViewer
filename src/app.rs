@@ -574,6 +574,7 @@ impl eframe::App for FileViewerApp {
                                 let do_highlight = !self.text_is_big && text.len() <= HIGHLIGHT_CHAR_THRESHOLD;
                                 if do_line_numbers || do_highlight || !self.search_query.is_empty() {
                                     let mut bracket_depth: i32 = 0;
+                                    let mut in_block_comment = false;
                                     let ext = self
                                         .current_path
                                         .as_ref()
@@ -604,7 +605,7 @@ impl eframe::App for FileViewerApp {
                                         if do_line_numbers {
                                             line_job.append(&format!("{:>4} ", i + 1), 0.0, egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() });
                                         }
-                                        append_highlighted(&mut line_job, line, &ext, &self.search_query, font_id.clone(), text_color, do_highlight, &mut bracket_depth, self.search_current, &mut counter);
+                                        append_highlighted(&mut line_job, line, &ext, &self.search_query, font_id.clone(), text_color, do_highlight, &mut bracket_depth, self.search_current, &mut counter, &mut in_block_comment);
                                         let resp = ui.label(line_job);
                                         if target_line == Some(i) { target_rect = Some(resp.rect); }
                                     }
@@ -801,15 +802,106 @@ fn append_highlighted(
     depth: &mut i32,
     current_idx: usize,
     counter: &mut usize,
+    in_block_comment: &mut bool,
 ) {
-    // Very lightweight tokenization: comments, strings; plus search highlight
-    // Handle comment split first to avoid borrow issues with inner closure.
+    // Comments (single-line + multi-line for Rust) and strings, then search overlay
     if do_syntax {
+        // Handle Rust: combined // and /* */ comments across lines
+        if ext == "rs" {
+            let mut i = 0usize;
+            // Consume block comment if already inside
+            if *in_block_comment {
+                if let Some(end) = line[i..].find("*/") { // end relative
+                    let end_abs = i + end + 2;
+                    let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                    job.append(&line[i..end_abs], 0.0, fmt);
+                    *in_block_comment = false;
+                    i = end_abs;
+                } else {
+                    let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                    job.append(&line[i..], 0.0, fmt);
+                    return;
+                }
+            }
+            // Process rest of line
+            while i < line.len() {
+                let rest = &line[i..];
+                let pos_sl = rest.find("//");
+                let pos_blk = rest.find("/*");
+                match (pos_sl, pos_blk) {
+                    (Some(psl), Some(pblk)) if psl < pblk => {
+                        // tokenize before //, then comment the rest
+                        if psl > 0 {
+                            token_highlight(job, &rest[..psl], ext, font_id.clone(), base_color, query, do_syntax, depth, current_idx, counter);
+                        }
+                        let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                        job.append(&rest[psl..], 0.0, fmt);
+                        return;
+                    }
+                    (Some(psl), None) => {
+                        if psl > 0 {
+                            token_highlight(job, &rest[..psl], ext, font_id.clone(), base_color, query, do_syntax, depth, current_idx, counter);
+                        }
+                        let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                        job.append(&rest[psl..], 0.0, fmt);
+                        return;
+                    }
+                    (None, Some(pblk)) => {
+                        // tokenize before /*, then enter block comment
+                        if pblk > 0 {
+                            token_highlight(job, &rest[..pblk], ext, font_id.clone(), base_color, query, do_syntax, depth, current_idx, counter);
+                        }
+                        let after = pblk + 2;
+                        let tail = &rest[after..];
+                        if let Some(end) = tail.find("*/") {
+                            // inline close
+                            let end_abs = i + after + end + 2;
+                            let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                            job.append(&line[i + pblk..end_abs], 0.0, fmt);
+                            i = end_abs;
+                            continue;
+                        } else {
+                            let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                            job.append(&rest[pblk..], 0.0, fmt);
+                            *in_block_comment = true;
+                            return;
+                        }
+                    }
+                    (None, None) => {
+                        // No comments: tokenize remainder
+                        token_highlight(job, rest, ext, font_id.clone(), base_color, query, do_syntax, depth, current_idx, counter);
+                        return;
+                    }
+                    (Some(psl), Some(pblk)) => {
+                        // pblk < psl
+                        if pblk > 0 {
+                            token_highlight(job, &rest[..pblk], ext, font_id.clone(), base_color, query, do_syntax, depth, current_idx, counter);
+                        }
+                        let after = pblk + 2;
+                        let tail = &rest[after..];
+                        if let Some(end) = tail.find("*/") {
+                            let end_abs = i + after + end + 2;
+                            let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                            job.append(&line[i + pblk..end_abs], 0.0, fmt);
+                            i = end_abs;
+                            continue;
+                        } else {
+                            let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                            job.append(&rest[pblk..], 0.0, fmt);
+                            *in_block_comment = true;
+                            return;
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        // Single-line comments for other languages
         let comment_prefix = if ext == "rs" || ext == "js" { "//" } else if ext == "toml" { "#" } else { "" };
         let comment_prefix = if ext == "py" { "#" } else { comment_prefix };
         if !comment_prefix.is_empty() {
             if let Some(pos) = line.find(comment_prefix) {
-                append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax, depth, current_idx, counter);
+                append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax, depth, current_idx, counter, in_block_comment);
                 let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
                 job.append(&line[pos..], 0.0, fmt);
                 return;
