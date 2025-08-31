@@ -612,21 +612,19 @@ fn append_with_search(job: &mut LayoutJob, text: &str, font_id: egui::FontId, co
     }
     let lc_query = query.to_ascii_lowercase();
     let mut rest = text;
-    let lc_rest_full = rest.to_ascii_lowercase();
-    let mut pos = 0usize;
-    while pos < lc_rest_full.len() {
-        if let Some(found) = lc_rest_full[pos..].find(&lc_query) {
-            let abs = pos + found;
-            let prefix = &rest[..abs];
+    loop {
+        let lc_rest = rest.to_ascii_lowercase();
+        if let Some(found_rel) = lc_rest.find(&lc_query) {
+            let prefix = &rest[..found_rel];
             if !prefix.is_empty() {
                 job.append(prefix, 0.0, egui::TextFormat { font_id: font_id.clone(), color, ..Default::default() });
             }
-            let matched = &rest[abs..abs + lc_query.len()];
+            let matched = &rest[found_rel..found_rel + lc_query.len()];
             let mut fmt = egui::TextFormat { font_id: font_id.clone(), color, ..Default::default() };
             fmt.background = egui::Color32::from_rgba_premultiplied(255, 255, 0, 64);
             job.append(matched, 0.0, fmt);
-            rest = &rest[abs + lc_query.len()..];
-            pos = abs + lc_query.len();
+            rest = &rest[found_rel + lc_query.len()..];
+            if rest.is_empty() { break; }
         } else {
             if !rest.is_empty() {
                 job.append(rest, 0.0, egui::TextFormat { font_id, color, ..Default::default() });
@@ -734,7 +732,7 @@ fn append_highlighted(
         if !comment_prefix.is_empty() {
             if let Some(pos) = line.find(comment_prefix) {
                 append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax, depth);
-                let mut fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
                 job.append(&line[pos..], 0.0, fmt);
                 return;
             }
