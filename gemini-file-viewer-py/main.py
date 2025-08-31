@@ -6,6 +6,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 IMG_EXTS = {"png", "jpg", "jpeg", "gif", "bmp", "webp"}
 TXT_EXTS = {"txt", "rs", "py", "toml", "md", "json", "js", "html", "css"}
+MAX_IMAGE_TEXTURE_BYTES = 128 * 1024 * 1024  # ~128 MB RGBA
 
 
 class ImageView(QtWidgets.QLabel):
@@ -191,6 +192,15 @@ class MainWindow(QtWidgets.QMainWindow):
         ext = path.suffix.lower().lstrip(".")
         try:
             if ext in IMG_EXTS:
+                # Pre-check dimensions without fully decoding
+                reader = QtGui.QImageReader(str(path))
+                size = reader.size()
+                if size.width() > 0 and size.height() > 0:
+                    est = size.width() * size.height() * 4
+                    if est > MAX_IMAGE_TEXTURE_BYTES:
+                        raise RuntimeError(
+                            f"Image too large: {size.width()}x{size.height()} (~{est/1024/1024:.1f} MB RGBA). Limit ~{MAX_IMAGE_TEXTURE_BYTES/1024/1024:.0f} MB"
+                        )
                 pix = QtGui.QPixmap(str(path))
                 if pix.isNull():
                     raise RuntimeError("Failed to load image")
@@ -276,8 +286,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         pix = self.image._pix
         eff = self._effective_image_zoom()
+        est = (pix.width() * pix.height() * 4) / (1024*1024)
         extra = " Fit: on" if self.image.fit_to_window else ""
-        self.status.showMessage(f"{self._current_path} — {pix.width()}x{pix.height()} px — Zoom: {eff*100:.0f}%{extra}")
+        self.status.showMessage(f"{self._current_path} — {pix.width()}x{pix.height()} px — Zoom: {eff*100:.0f}% — Texture ~{est:.1f} MB{extra}")
 
     def _ensure_settings_dir(self):
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)

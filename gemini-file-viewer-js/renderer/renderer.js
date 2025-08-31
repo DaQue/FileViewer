@@ -13,6 +13,7 @@ const matchesEl = document.getElementById(''matches'');
 let currentPath = null;
 let currentExt = '';
 let imageZoom = 1.0;
+const MAX_IMAGE_TEXTURE_BYTES = 128 * 1024 * 1024; // ~128MB
 
 openBtn.addEventListener('click', async () => {
   const info = await window.api.open();
@@ -37,7 +38,18 @@ async function handleOpenInfo(info) {
     fitChk.checked = false;
     imgEl.style.transform = `scale(${imageZoom})`;
     imgEl.src = info.path;
-    updateImageStatus();
+    imgEl.onload = () => {
+      const est = (imgEl.naturalWidth * imgEl.naturalHeight * 4);
+      if (est > MAX_IMAGE_TEXTURE_BYTES) {
+        alert(`Image too large: ${imgEl.naturalWidth}x${imgEl.naturalHeight} (~${(est/1024/1024).toFixed(1)} MB RGBA). Limit ~${(MAX_IMAGE_TEXTURE_BYTES/1024/1024)} MB`);
+        imgEl.src = '';
+        textEl.classList.add('hidden');
+        imgEl.classList.add('hidden');
+        statusEl.textContent = 'Image rejected due to size';
+        return;
+      }
+      updateImageStatus();
+    };
     addRecent(info.path);
   }
 }
@@ -192,6 +204,7 @@ function updateImageStatus() {
     const ch = document.getElementById(''content'').clientHeight;
     const sx = cw / natW; const sy = ch / natH; eff = Math.max(0.1, Math.min(6.0, Math.min(sx, sy)));
   }
+  const estMB = ((natW * natH * 4) / (1024*1024)).toFixed(1);
   const fitNote = fitChk.checked ? ' Fit: on' : '';
-  statusEl.textContent = `${path} — ${natW}x${natH} px — Zoom: ${(eff*100).toFixed(0)}%${fitNote}`;
+  statusEl.textContent = `${path} — ${natW}x${natH} px — Zoom: ${(eff*100).toFixed(0)}% — Texture ~${estMB} MB${fitNote}`;
 }
