@@ -5,10 +5,13 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
     <title>Gemini File Viewer (JS)</title>
     <style>
+      :root { --bg:#fff; --fg:#111; --border:#ddd; --muted:#666; }
+      body.dark { --bg:#1f1f1f; --fg:#e6e6e6; --border:#333; --muted:#9a9a9a; }
       html, body { height: 100%; margin: 0; }
-      body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
-      #toolbar { padding: 8px; border-bottom: 1px solid #ddd; display: flex; gap: 8px; align-items: center; }
-      #status { padding: 6px 8px; border-top: 1px solid #ddd; font-size: 12px; display: flex; gap: 12px; }
+      body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+      #toolbar { padding: 8px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+      #toolbar input, #toolbar button, #toolbar select, #toolbar label { color: var(--fg); background: var(--bg); }
+      #status { padding: 6px 8px; border-top: 1px solid var(--border); font-size: 12px; display: flex; gap: 12px; color: var(--muted); }
       #content { flex: 1; overflow: auto; display: grid; place-items: center; }
       #text { width: min(1200px, 100%); white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
       #image { max-width: none; max-height: none; transform-origin: center center; }
@@ -21,6 +24,7 @@
       <button id="open">Open…</button>
       <label>Recent: <select id="recent"><option value="">(empty)</option></select></label>
       <div class="sep" style="width:1px;height:24px;background:#ddd"></div>
+      <label><input type="checkbox" id="dark" /> Dark Mode</label>
       <label><input type="checkbox" id="fit" /> Fit to Window</label>
       <button id="zm-">Zoom -</button>
       <button id="zm+">Zoom +</button>

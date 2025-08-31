@@ -1,6 +1,7 @@
 ﻿const openBtn = document.getElementById(''open'');
 const recentSel = document.getElementById(''recent'');
 const fitChk = document.getElementById(''fit'');
+const darkChk = document.getElementById(''dark'');
 const zmMinus = document.getElementById(''zm-'');
 const zmPlus = document.getElementById(''zm+'');
 const z100 = document.getElementById(''z100'');
@@ -192,6 +193,16 @@ recentSel.addEventListener('change', async () => {
 // Init
 refreshRecents();
 window.addEventListener('resize', updateImageTransform);
+
+// Dark mode settings
+function applyDark(d) { document.body.classList.toggle('dark', d); }
+function getSettings() { try { return JSON.parse(localStorage.getItem('settings')||'{}'); } catch { return {} } }
+function setSettings(obj) { localStorage.setItem('settings', JSON.stringify(obj)); }
+const settings = getSettings();
+const dark = !!settings.dark; applyDark(dark); if (darkChk) darkChk.checked = dark;
+const savedFit = !!settings.fit; if (fitChk) fitChk.checked = savedFit;
+if (darkChk) darkChk.addEventListener('change', () => { const s=getSettings(); s.dark=darkChk.checked; setSettings(s); applyDark(darkChk.checked); });
+if (fitChk) fitChk.addEventListener('change', () => { const s=getSettings(); s.fit=fitChk.checked; setSettings(s); });
 
 function updateImageStatus() {
   if (imgEl.classList.contains(''hidden'')) return;

@@ -56,6 +56,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_path: Path | None = None
         self._recents: list[Path] = []
         self._settings_path = Path.home() / ".gemini_file_viewer_py" / "settings.json"
+        self._dark_mode: bool = True
         self._ensure_settings_dir()
         self._load_settings()
 
@@ -98,6 +99,12 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_recent.setMenu(self.recent_menu)
         btn_recent.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         tb.addWidget(btn_recent)
+        tb.addSeparator()
+        self.chk_dark = QtWidgets.QCheckBox("Dark Mode")
+        self.chk_dark.setChecked(self._dark_mode)
+        self.chk_dark.stateChanged.connect(self.toggle_dark)
+        tb.addWidget(self.chk_dark)
+        self.apply_theme(self._dark_mode)
         tb.addSeparator()
         self.chk_fit = QtWidgets.QCheckBox("Fit to Window")
         self.chk_fit.stateChanged.connect(self.toggle_fit)
@@ -159,6 +166,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.image.fit_to_window = bool(state)
         self.image.update()
         self._update_image_status()
+        self._save_settings()
+
+    def toggle_dark(self, state):
+        self._dark_mode = bool(state)
+        self.apply_theme(self._dark_mode)
+        self._save_settings()
 
     def zoom_image(self, factor: float):
         if not self.image.isVisible():
@@ -300,6 +313,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 obj = json.loads(self._settings_path.read_text(encoding="utf-8"))
                 rec = obj.get("recents", [])
                 self._recents = [Path(p) for p in rec if isinstance(p, str)]
+                self._dark_mode = bool(obj.get("dark", True))
+                self.chk_fit.setChecked(bool(obj.get("fit", False)))
+                self.apply_theme(self._dark_mode)
         except Exception:
             self._recents = []
         finally:
@@ -308,10 +324,38 @@ class MainWindow(QtWidgets.QMainWindow):
     def _save_settings(self):
         try:
             import json
-            data = {"recents": [str(p) for p in self._recents[-10:]]}
+            data = {
+                "recents": [str(p) for p in self._recents[-10:]],
+                "dark": self._dark_mode,
+                "fit": self.chk_fit.isChecked(),
+            }
             self._settings_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception:
             pass
+
+    def apply_theme(self, dark: bool):
+        app = QtWidgets.QApplication.instance()
+        if not app:
+            return
+        if dark:
+            app.setStyle("Fusion")
+            palette = QtGui.QPalette()
+            palette.setColor(QtGui.QPalette.Window, QtGui.QColor(53,53,53))
+            palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.Base, QtGui.QColor(25,25,25))
+            palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(53,53,53))
+            palette.setColor(QtGui.QPalette.ToolTipBase, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.ToolTipText, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.Button, QtGui.QColor(53,53,53))
+            palette.setColor(QtGui.QPalette.ButtonText, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.BrightText, QtCore.Qt.red)
+            palette.setColor(QtGui.QPalette.Link, QtGui.QColor(42,130,218))
+            palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(42,130,218))
+            palette.setColor(QtGui.QPalette.HighlightedText, QtCore.Qt.black)
+            app.setPalette(palette)
+        else:
+            app.setPalette(app.style().standardPalette())
 
 
 class SimpleHighlighter(QtGui.QSyntaxHighlighter):
