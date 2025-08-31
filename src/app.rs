@@ -50,6 +50,8 @@ pub struct FileViewerApp {
     search_active: bool,
     #[serde(skip)]
     search_count: usize,
+    #[serde(skip)]
+    search_current: usize,
 }
 
 impl FileViewerApp {
@@ -246,6 +248,7 @@ impl Default for FileViewerApp {
             search_query: String::new(),
             search_active: false,
             search_count: 0,
+            search_current: 0,
         }
     }
 }
@@ -445,6 +448,7 @@ impl eframe::App for FileViewerApp {
                     }
                     if resp.changed() || (prev.is_empty() && !self.search_query.is_empty()) {
                         self.search_count = 0;
+                        self.search_current = 0;
                         if let Some(Content::Text(ref text)) = self.content {
                             if !self.search_query.is_empty() && text.len() <= HIGHLIGHT_CHAR_THRESHOLD {
                                 let needle = self.search_query.to_ascii_lowercase();
@@ -454,6 +458,16 @@ impl eframe::App for FileViewerApp {
                     }
                     if !self.search_query.is_empty() {
                         ui.label(format!("{} match(es)", self.search_count));
+                        ui.add_space(8.0);
+                        if ui.button("Prev").clicked() && self.search_count > 0 {
+                            if self.search_current == 0 { self.search_current = self.search_count.saturating_sub(1); } else { self.search_current -= 1; }
+                        }
+                        if ui.button("Next").clicked() && self.search_count > 0 {
+                            self.search_current = (self.search_current + 1) % self.search_count;
+                        }
+                        if self.search_count > 0 {
+                            ui.label(format!("{}/{}", self.search_current + 1, self.search_count));
+                        }
                     }
                 });
             });
@@ -615,7 +629,7 @@ impl eframe::App for FileViewerApp {
     }
 }
 
-fn append_with_search(job: &mut LayoutJob, text: &str, font_id: egui::FontId, color: egui::Color32, query: &str) {
+fn append_with_search(job: &mut LayoutJob, text: &str, font_id: egui::FontId, color: egui::Color32, query: &str, current_idx: usize, counter: &mut usize) {
     if query.is_empty() {
         job.append(text, 0.0, egui::TextFormat { font_id, color, ..Default::default() });
         return;
@@ -631,8 +645,13 @@ fn append_with_search(job: &mut LayoutJob, text: &str, font_id: egui::FontId, co
             }
             let matched = &rest[found_rel..found_rel + lc_query.len()];
             let mut fmt = egui::TextFormat { font_id: font_id.clone(), color, ..Default::default() };
-            fmt.background = egui::Color32::from_rgba_premultiplied(255, 255, 0, 64);
+            if *counter == current_idx {
+                fmt.background = egui::Color32::from_rgba_premultiplied(224, 108, 117, 96);
+            } else {
+                fmt.background = egui::Color32::from_rgba_premultiplied(255, 255, 0, 64);
+            }
             job.append(matched, 0.0, fmt);
+            *counter += 1;
             rest = &rest[found_rel + lc_query.len()..];
             if rest.is_empty() { break; }
         } else {
@@ -655,7 +674,7 @@ fn token_highlight(
     depth: &mut i32,
 ) {
     if !do_syntax {
-        append_with_search(job, text, font_id, base_color, query);
+        append_with_search(job, text, font_id, base_color, query, usize::MAX, &mut 0);
         return;
     }
     let kw_color = egui::Color32::from_rgb(97, 175, 239); // blue-ish
@@ -699,7 +718,7 @@ fn token_highlight(
                 } else {
                     (base_color, false)
                 };
-                append_with_search(job, &buf, font_id.clone(), color, query);
+                append_with_search(job, &buf, font_id.clone(), color, query, usize::MAX, &mut 0);
                 buf.clear();
             }
             let color = match ch {
@@ -716,7 +735,7 @@ fn token_highlight(
                 _ => None,
             };
             let delim = ch.to_string();
-            append_with_search(job, &delim, font_id.clone(), color.unwrap_or(base_color), query);
+            append_with_search(job, &delim, font_id.clone(), color.unwrap_or(base_color), query, usize::MAX, &mut 0);
         }
     }
     if !buf.is_empty() {
@@ -732,7 +751,7 @@ fn token_highlight(
         } else {
             (base_color, false)
         };
-        append_with_search(job, &buf, font_id, color, query);
+        append_with_search(job, &buf, font_id, color, query, usize::MAX, &mut 0);
     }
 }
 
@@ -775,7 +794,7 @@ fn append_highlighted(
                     s.push(c2);
                     if c2 == '"' { break; }
                 }
-                append_with_search(job, &s, font_id.clone(), egui::Color32::from_rgb(152, 195, 121), query);
+                append_with_search(job, &s, font_id.clone(), egui::Color32::from_rgb(152, 195, 121), query, usize::MAX, &mut 0);
             } else {
                 buf.push(ch);
             }
