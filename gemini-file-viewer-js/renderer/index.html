@@ -14,6 +14,8 @@
       #status { padding: 6px 8px; border-top: 1px solid var(--border); font-size: 12px; display: flex; gap: 12px; color: var(--muted); }
       #content { flex: 1; overflow: auto; display: grid; place-items: center; }
       #text { width: min(1200px, 100%); white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+      .ln .gutter { color: var(--muted); display: inline-block; width: 48px; text-align: right; margin-right: 8px; user-select: none; }
+      .ln-off .gutter { display: none; }
       #image { max-width: none; max-height: none; transform-origin: center center; }
       .hidden { display: none; }
       .match { background: rgba(255, 255, 0, 0.4); }
@@ -27,6 +29,7 @@
       <label><input type="checkbox" id="dark" /> Dark Mode</label>
       <label><input type="checkbox" id="fit" /> Fit to Window</label>
       <label><input type="checkbox" id="wrap" /> Word Wrap</label>
+      <label><input type="checkbox" id="linenumbers" /> Line Numbers</label>
       <button id="zm-">Zoom -</button>
       <button id="zm+">Zoom +</button>
       <button id="z100">100%</button>

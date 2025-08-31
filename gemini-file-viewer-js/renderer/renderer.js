@@ -97,8 +97,12 @@ function renderText(text, ext, query) {
   let html = '';
   let count = 0;
   let depth = 0;
+  const showLN = (getSettings().ln !== false);
+  let ln = 1;
   for (const line of lines) {
-    html += highlightLine(line, ext, query, () => depth, (d) => { depth = d; }) + ''\n'';
+    const code = highlightLine(line, ext, query, () => depth, (d) => { depth = d; });
+    html += `<span class="gutter">${showLN ? ln : ''}</span>${code}` + '\n';
+    ln++;
   }
   textEl.innerHTML = html;
   if (query) {

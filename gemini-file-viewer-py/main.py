@@ -114,6 +114,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # apply initial wrap
         self.apply_wrap(self._wrap)
         tb.addSeparator()
+        self.chk_ln = QtWidgets.QCheckBox("Line Numbers")
+        self.chk_ln.setChecked(True)
+        self.chk_ln.stateChanged.connect(self.toggle_line_numbers)
+        tb.addWidget(self.chk_ln)
+        tb.addSeparator()
+        self.text.set_line_numbers_enabled(self.chk_ln.isChecked())
         self.chk_fit = QtWidgets.QCheckBox("Fit to Window")
         self.chk_fit.stateChanged.connect(self.toggle_fit)
         tb.addWidget(self.chk_fit)
@@ -189,6 +195,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def apply_wrap(self, enabled: bool):
         mode = QtWidgets.QPlainTextEdit.WidgetWidth if enabled else QtWidgets.QPlainTextEdit.NoWrap
         self.text.setLineWrapMode(mode)
+
+    def toggle_line_numbers(self, state):
+        on = bool(state)
+        # Downgrade if very large
+        if self.text.blockCount() > 50000:
+            on = False
+            self.chk_ln.setChecked(False)
+        self.text.set_line_numbers_enabled(on)
+        self._save_settings()
 
     def zoom_image(self, factor: float):
         if not self.image.isVisible():
@@ -335,6 +350,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.chk_fit.setChecked(bool(obj.get("fit", False)))
                 self._wrap = bool(obj.get("wrap", True))
                 self.apply_theme(self._dark_mode)
+                ln = obj.get("line_numbers")
+                if ln is not None:
+                    self.chk_ln.setChecked(bool(ln))
+                    self.text.set_line_numbers_enabled(bool(ln))
         except Exception:
             self._recents = []
         finally:
@@ -348,6 +367,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "dark": self._dark_mode,
                 "fit": self.chk_fit.isChecked(),
                 "wrap": self._wrap,
+                "line_numbers": self.chk_ln.isChecked(),
             }
             self._settings_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception:
