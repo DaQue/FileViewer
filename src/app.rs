@@ -1,7 +1,7 @@
 #![allow(clippy::needless_return)]
 
 use eframe::egui;
-use egui::{text::LayoutJob, ColorImage, TextureHandle};
+use egui::{text::LayoutJob, ColorImage, RichText, TextureHandle};
 use image::GenericImageView;
 use rfd::FileDialog;
 use std::{
@@ -29,6 +29,11 @@ pub struct FileViewerApp {
     dark_mode: bool,
     recent_files: Vec<PathBuf>,
     show_line_numbers: bool,
+    word_wrap: bool,
+    text_zoom: f32,
+    image_zoom: f32,
+    #[serde(skip)]
+    show_about: bool,
 }
 
 impl FileViewerApp {
@@ -43,6 +48,29 @@ impl FileViewerApp {
             return app;
         }
         Default::default()
+    }
+
+    fn apply_theme(&self, ctx: &egui::Context) {
+        let mut visuals = if self.dark_mode {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+
+        // Accent colors
+        visuals.selection.bg_fill = if self.dark_mode {
+            egui::Color32::from_rgb(80, 140, 255)
+        } else {
+            egui::Color32::from_rgb(0, 110, 230)
+        };
+        visuals.hyperlink_color = visuals.selection.bg_fill;
+
+        // Start from current style, adjust spacing, then inject our visuals
+        let mut style = (*ctx.style()).clone();
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(10.0, 6.0);
+        style.visuals = visuals;
+        ctx.set_style(style);
     }
 
     fn is_supported_image(path: &Path) -> bool {
@@ -154,6 +182,10 @@ impl Default for FileViewerApp {
             dark_mode: true,
             recent_files: Vec::new(),
             show_line_numbers: true,
+            word_wrap: true,
+            text_zoom: 1.0,
+            image_zoom: 1.0,
+            show_about: false,
         }
     }
 }
@@ -167,18 +199,83 @@ impl eframe::App for FileViewerApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.set_visuals(if self.dark_mode {
-            egui::Visuals::dark()
-        } else {
-            egui::Visuals::light()
-        });
+        // Apply polished visuals and spacing (initial pass).
+        self.apply_theme(ctx);
 
         let mut file_to_load: Option<PathBuf> = None;
+
+        // Keyboard shortcuts and Ctrl+Wheel zoom
+        let mut toggle_dark = false;
+        ctx.input(|i| {
+            if i.modifiers.command && i.key_pressed(egui::Key::O) {
+                if let Some(path) = FileDialog::new()
+                    .add_filter("All Supported", &["txt","rs","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
+                    .add_filter("Images", &["png","jpg","jpeg","gif","bmp","webp"])
+                    .add_filter("Text/Source", &["txt","rs","toml","md","json","js","html","css"])
+                    .pick_file()
+                {
+                    file_to_load = Some(path);
+                }
+            }
+            if i.modifiers.command && i.key_pressed(egui::Key::D) {
+                toggle_dark = true;
+            }
+            if i.modifiers.command && i.key_pressed(egui::Key::L) {
+                self.show_line_numbers = !self.show_line_numbers;
+                self.save_settings_to_disk();
+            }
+            if i.modifiers.command && i.key_pressed(egui::Key::W) {
+                self.word_wrap = !self.word_wrap;
+                self.save_settings_to_disk();
+            }
+
+            // Ctrl + Mouse wheel zoom for content
+            if i.modifiers.command && i.raw_scroll_delta.y != 0.0 {
+                let dir = i.raw_scroll_delta.y.signum();
+                match &self.content {
+                    Some(Content::Text(_)) => {
+                        let factor = if dir > 0.0 { 1.05 } else { 1.0 / 1.05 };
+                        self.text_zoom = (self.text_zoom * factor).clamp(0.6, 3.0);
+                    }
+                    Some(Content::Image(_)) => {
+                        let factor = if dir > 0.0 { 1.10 } else { 1.0 / 1.10 };
+                        self.image_zoom = (self.image_zoom * factor).clamp(0.1, 6.0);
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        // About dialog
+        if self.show_about {
+            egui::Window::new("About Gemini File Viewer")
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut self.show_about)
+                .show(ctx, |ui| {
+                    ui.label(RichText::new("Gemini File Viewer 2.0").strong());
+                    ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                    ui.separator();
+                    ui.label("Shortcuts:");
+                    ui.monospace("Ctrl+O — Open file");
+                    ui.monospace("Ctrl+D — Toggle dark mode");
+                    ui.monospace("Ctrl+L — Toggle line numbers");
+                    ui.monospace("Ctrl+W — Toggle word wrap");
+                    ui.monospace("Ctrl+Wheel — Zoom text/image");
+                });
+        }
+        if toggle_dark {
+            self.dark_mode = !self.dark_mode;
+            self.apply_theme(ctx);
+            self.save_settings_to_disk();
+        }
 
         // Top Toolbar
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Open File...").clicked()
+                if ui
+                    .button(RichText::new("📂 Open File…"))
+                    .clicked()
                     && let Some(path) = FileDialog::new()
                         .add_filter("All Supported", &["txt","rs","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
                         .add_filter("Images", &["png","jpg","jpeg","gif","bmp","webp"])
@@ -188,7 +285,7 @@ impl eframe::App for FileViewerApp {
                     file_to_load = Some(path);
                 }
 
-                ui.menu_button("Recent Files", |ui| {
+                ui.menu_button(RichText::new("🕘 Recent Files"), |ui| {
                     ui.set_min_width(480.0);
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                     if self.recent_files.is_empty() {
@@ -206,7 +303,7 @@ impl eframe::App for FileViewerApp {
                         }
                     }
                     ui.separator();
-                    if ui.button("Clear Recent Files").clicked() {
+                    if ui.button("🧹 Clear Recent Files").clicked() {
                         self.recent_files.clear();
                         ui.close_menu();
                     }
@@ -215,14 +312,18 @@ impl eframe::App for FileViewerApp {
                 ui.separator();
                 let prev_dark = self.dark_mode;
                 let prev_lines = self.show_line_numbers;
-                ui.checkbox(&mut self.dark_mode, "Dark Mode");
-                ui.checkbox(&mut self.show_line_numbers, "Line Numbers");
+                ui.checkbox(&mut self.dark_mode, "🌙 Dark Mode");
+                ui.checkbox(&mut self.show_line_numbers, "🔢 Line Numbers");
+                if self.dark_mode != prev_dark {
+                    // Reapply theme immediately so toggle takes effect this frame.
+                    self.apply_theme(ctx);
+                }
                 if self.dark_mode != prev_dark || self.show_line_numbers != prev_lines {
                     self.save_settings_to_disk();
                 }
                 ui.separator();
 
-                if ui.button("Clear").clicked() {
+                if ui.button("🧹 Clear").clicked() {
                     self.content = None;
                     self.current_path = None;
                     self.error_message = None;
@@ -234,11 +335,26 @@ impl eframe::App for FileViewerApp {
         egui::TopBottomPanel::bottom("statusbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if let Some(path) = &self.current_path {
-                    ui.monospace(path.to_string_lossy());
+                    ui.monospace(format!("📄 {}", path.to_string_lossy()));
                     if let Ok(metadata) = fs::metadata(path) {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(format!("({:.1} KB)", metadata.len() as f64 / 1024.0));
                         });
+                    }
+                    if ui.button("Copy Path").on_hover_text("Copy path to clipboard").clicked() {
+                        ui.ctx().copy_text(path.to_string_lossy().into());
+                    }
+                    #[cfg(target_os = "windows")]
+                    if ui.button("Open Folder").clicked() {
+                        if let Some(parent) = path.parent() {
+                            let _ = std::process::Command::new("explorer").arg(parent).spawn();
+                        }
+                    }
+                    if let Some(Content::Image(texture)) = &self.content {
+                        let size = texture.size();
+                        ui.separator();
+                        ui.label(format!("{}×{} px", size[0], size[1]));
+                        ui.label(format!("{:.0}%", self.image_zoom * 100.0));
                     }
                 } else {
                     ui.label("No file selected.");
@@ -255,43 +371,45 @@ impl eframe::App for FileViewerApp {
             if let Some(content) = &self.content {
                 match content {
                     Content::Text(text) => {
-                        egui::ScrollArea::both().show(ui, |ui| {
-                            if self.show_line_numbers {
-                                let mut job = LayoutJob::default();
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            // Wrap preference
+                            ui.style_mut().wrap_mode = Some(if self.word_wrap { egui::TextWrapMode::Wrap } else { egui::TextWrapMode::Extend });
+                            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
                                 let text_style = egui::TextStyle::Monospace;
+                                let mut font_id = text_style.resolve(ui.style());
+                                font_id.size = (font_id.size * self.text_zoom).clamp(8.0, 48.0);
                                 let text_color = ui.visuals().text_color();
-                                for (i, line) in text.lines().enumerate() {
-                                    job.append(
-                                        &format!("{:>4} ", i + 1),
-                                        0.0,
-                                        egui::TextFormat {
-                                            font_id: text_style.resolve(ui.style()),
-                                            color: egui::Color32::GRAY,
-                                            ..Default::default()
-                                        },
-                                    );
-                                    job.append(
-                                        line,
-                                        0.0,
-                                        egui::TextFormat {
-                                            font_id: text_style.resolve(ui.style()),
-                                            color: text_color,
-                                            ..Default::default()
-                                        },
-                                    );
-                                    job.append("\n", 0.0, egui::TextFormat::default());
+                                if self.show_line_numbers {
+                                    let mut job = LayoutJob::default();
+                                    for (i, line) in text.lines().enumerate() {
+                                        job.append(&format!("{:>4} ", i + 1), 0.0, egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() });
+                                        job.append(line, 0.0, egui::TextFormat { font_id: font_id.clone(), color: text_color, ..Default::default() });
+                                        job.append("\n", 0.0, egui::TextFormat::default());
+                                    }
+                                    ui.label(job);
+                                } else {
+                                    ui.label(RichText::new(text).monospace().size(font_id.size));
                                 }
-                                ui.label(job);
-                            } else {
-                                ui.label(text);
-                            }
+                            });
                         });
                     }
                     Content::Image(texture) => {
-                        let image_widget = egui::Image::new(texture).max_size(ui.available_size());
-                        ui.add(image_widget);
+                        egui::ScrollArea::both().show(ui, |ui| {
+                            ui.vertical_centered(|ui| {
+                                let size = texture.size();
+                                let desired = egui::vec2(size[0] as f32 * self.image_zoom, size[1] as f32 * self.image_zoom);
+                                ui.add_sized(desired, egui::Image::new(texture));
+                            });
+                        });
                     }
                 }
+            } else if self.error_message.is_none() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(ui.available_height() * 0.25);
+                    ui.label(RichText::new("✨ Gemini File Viewer").heading());
+                    ui.add_space(6.0);
+                    ui.label("Open a file to get started.");
+                });
             }
         });
 
