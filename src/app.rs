@@ -424,7 +424,11 @@ impl eframe::App for FileViewerApp {
                 // Image tools
                 if matches!(self.content, Some(Content::Image(_))) {
                     ui.separator();
+                    let prev_fit = self.image_fit;
                     ui.checkbox(&mut self.image_fit, "Fit to Window");
+                    if self.image_fit != prev_fit {
+                        self.save_settings_to_disk();
+                    }
                     if ui.button("Zoom -").clicked() { self.image_fit = false; self.image_zoom = (self.image_zoom / 1.10).clamp(0.1, 6.0); }
                     if ui.button("Zoom +").clicked() { self.image_fit = false; self.image_zoom = (self.image_zoom * 1.10).clamp(0.1, 6.0); }
                     if ui.button("100%").clicked() {
@@ -445,6 +449,15 @@ impl eframe::App for FileViewerApp {
                     if self.search_active {
                         resp.request_focus();
                         self.search_active = false;
+                    }
+                    // Enter / Shift+Enter navigate matches
+                    let (enter, shift) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.modifiers.shift));
+                    if enter && self.search_count > 0 {
+                        if shift {
+                            if self.search_current == 0 { self.search_current = self.search_count.saturating_sub(1); } else { self.search_current -= 1; }
+                        } else {
+                            self.search_current = (self.search_current + 1) % self.search_count;
+                        }
                     }
                     if resp.changed() || (prev.is_empty() && !self.search_query.is_empty()) {
                         self.search_count = 0;
@@ -560,7 +573,6 @@ impl eframe::App for FileViewerApp {
                                 let do_line_numbers = self.show_line_numbers && !self.text_is_big;
                                 let do_highlight = !self.text_is_big && text.len() <= HIGHLIGHT_CHAR_THRESHOLD;
                                 if do_line_numbers || do_highlight || !self.search_query.is_empty() {
-                                    let mut job = LayoutJob::default();
                                     let mut bracket_depth: i32 = 0;
                                     let ext = self
                                         .current_path
@@ -568,14 +580,35 @@ impl eframe::App for FileViewerApp {
                                         .and_then(|p| p.extension().and_then(|s| s.to_str()))
                                         .unwrap_or("")
                                         .to_lowercase();
-                                    for (i, line) in text.lines().enumerate() {
-                                        if do_line_numbers {
-                                            job.append(&format!("{:>4} ", i + 1), 0.0, egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() });
+                                    // Determine target line for current match
+                                    let mut global_counter: usize = 0;
+                                    let mut target_line: Option<usize> = None;
+                                    if !self.search_query.is_empty() && self.search_count > 0 {
+                                        for (i, line) in text.lines().enumerate() {
+                                            let mut rest = line.to_ascii_lowercase();
+                                            let q = self.search_query.to_ascii_lowercase();
+                                            while let Some(pos) = rest.find(&q) {
+                                                if global_counter == self.search_current { target_line = Some(i); break; }
+                                                global_counter += 1;
+                                                let next = pos + q.len();
+                                                rest = rest[next..].to_string();
+                                            }
+                                            if target_line.is_some() { break; }
                                         }
-                                        append_highlighted(&mut job, line, &ext, &self.search_query, font_id.clone(), text_color, do_highlight, &mut bracket_depth);
-                                        job.append("\n", 0.0, egui::TextFormat::default());
                                     }
-                                    ui.label(job);
+                                    // Render per line and capture rect
+                                    let mut counter: usize = 0;
+                                    let mut target_rect: Option<egui::Rect> = None;
+                                    for (i, line) in text.lines().enumerate() {
+                                        let mut line_job = LayoutJob::default();
+                                        if do_line_numbers {
+                                            line_job.append(&format!("{:>4} ", i + 1), 0.0, egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() });
+                                        }
+                                        append_highlighted(&mut line_job, line, &ext, &self.search_query, font_id.clone(), text_color, do_highlight, &mut bracket_depth, self.search_current, &mut counter);
+                                        let resp = ui.label(line_job);
+                                        if target_line == Some(i) { target_rect = Some(resp.rect); }
+                                    }
+                                    if let Some(rect) = target_rect { ui.scroll_to_rect(rect, Some(egui::Align::Center)); }
                                 } else {
                                     ui.label(RichText::new(text).monospace().size(font_id.size));
                                 }
@@ -672,9 +705,11 @@ fn token_highlight(
     query: &str,
     do_syntax: bool,
     depth: &mut i32,
+    current_idx: usize,
+    counter: &mut usize,
 ) {
     if !do_syntax {
-        append_with_search(job, text, font_id, base_color, query, usize::MAX, &mut 0);
+        append_with_search(job, text, font_id, base_color, query, current_idx, counter);
         return;
     }
     let kw_color = egui::Color32::from_rgb(97, 175, 239); // blue-ish
@@ -718,7 +753,7 @@ fn token_highlight(
                 } else {
                     (base_color, false)
                 };
-                append_with_search(job, &buf, font_id.clone(), color, query, usize::MAX, &mut 0);
+                append_with_search(job, &buf, font_id.clone(), color, query, current_idx, counter);
                 buf.clear();
             }
             let color = match ch {
@@ -735,7 +770,7 @@ fn token_highlight(
                 _ => None,
             };
             let delim = ch.to_string();
-            append_with_search(job, &delim, font_id.clone(), color.unwrap_or(base_color), query, usize::MAX, &mut 0);
+            append_with_search(job, &delim, font_id.clone(), color.unwrap_or(base_color), query, current_idx, counter);
         }
     }
     if !buf.is_empty() {
@@ -751,7 +786,7 @@ fn token_highlight(
         } else {
             (base_color, false)
         };
-        append_with_search(job, &buf, font_id, color, query, usize::MAX, &mut 0);
+        append_with_search(job, &buf, font_id, color, query, current_idx, counter);
     }
 }
 
@@ -764,15 +799,17 @@ fn append_highlighted(
     base_color: egui::Color32,
     do_syntax: bool,
     depth: &mut i32,
+    current_idx: usize,
+    counter: &mut usize,
 ) {
     // Very lightweight tokenization: comments, strings; plus search highlight
     // Handle comment split first to avoid borrow issues with inner closure.
     if do_syntax {
-        let comment_prefix = if ext == "rs" { "//" } else if ext == "toml" { "#" } else { "" };
+        let comment_prefix = if ext == "rs" || ext == "js" { "//" } else if ext == "toml" { "#" } else { "" };
         let comment_prefix = if ext == "py" { "#" } else { comment_prefix };
         if !comment_prefix.is_empty() {
             if let Some(pos) = line.find(comment_prefix) {
-                append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax, depth);
+                append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax, depth, current_idx, counter);
                 let fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
                 job.append(&line[pos..], 0.0, fmt);
                 return;
@@ -787,14 +824,14 @@ fn append_highlighted(
         let mut chars = line.chars().peekable();
         while let Some(ch) = chars.next() {
             if ch == '"' {
-                if !buf.is_empty() { token_highlight(job, &buf, ext, font_id.clone(), base_color, query, do_syntax, depth); buf.clear(); }
+                if !buf.is_empty() { token_highlight(job, &buf, ext, font_id.clone(), base_color, query, do_syntax, depth, current_idx, counter); buf.clear(); }
                 buf.clear();
                 let mut s = String::from('"');
                 while let Some(c2) = chars.next() {
                     s.push(c2);
                     if c2 == '"' { break; }
                 }
-                append_with_search(job, &s, font_id.clone(), egui::Color32::from_rgb(152, 195, 121), query, usize::MAX, &mut 0);
+                append_with_search(job, &s, font_id.clone(), egui::Color32::from_rgb(152, 195, 121), query, current_idx, counter);
             } else {
                 buf.push(ch);
             }
@@ -805,6 +842,6 @@ fn append_highlighted(
 
     // Flush any remaining non-string content with token highlight
     if !buf.is_empty() {
-        token_highlight(job, &buf, ext, font_id, base_color, query, do_syntax, depth);
+        token_highlight(job, &buf, ext, font_id, base_color, query, do_syntax, depth, current_idx, counter);
     }
 }

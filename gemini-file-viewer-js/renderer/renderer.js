@@ -15,6 +15,7 @@ const copyBtn = document.getElementById(''copy'');
 const revealBtn = document.getElementById(''reveal'');
 const prevBtn = document.getElementById(''prev'');
 const nextBtn = document.getElementById(''next'');
+let inBlockComment = false;
 
 let currentPath = null;
 let currentExt = '';
@@ -154,13 +155,31 @@ function highlightLine(line, ext, query, getDepth, setDepth) {
       return `<span style="color:${palette[idx]}">${escapeHtml(s)}</span>`;
     }
   };
-  // Comments first
+  // Comments first (single-line and JS block comments)
   let cidx = -1;
-  if (ext === 'rs') cidx = line.indexOf('//');
+  if (ext === 'rs' || ext === 'js') cidx = line.indexOf('//');
   if (ext === 'py' || ext === 'toml') cidx = line.indexOf('#');
-  if (cidx >= 0) {
-    return highlightLine(line.slice(0,cidx), ext, query, getDepth, setDepth) + com(line.slice(cidx));
+  if (ext === 'js') {
+    let out = '';
+    let i = 0;
+    while (i < line.length) {
+      if (inBlockComment) {
+        const end = line.indexOf('*/', i);
+        if (end >= 0) { out += com(line.slice(i, end+2)); i = end + 2; inBlockComment = false; continue; }
+        out += com(line.slice(i)); return out;
+      } else {
+        const start = line.indexOf('/*', i);
+        const sl = line.indexOf('//', i);
+        if (sl >= 0 && (start < 0 || sl < start)) {
+          return highlightLine(line.slice(0, sl), ext, query, getDepth, setDepth) + com(line.slice(sl));
+        }
+        if (start >= 0) { out += highlightLine(line.slice(i, start), ext, query, getDepth, setDepth); i = start + 2; inBlockComment = true; continue; }
+        out += highlightLine(line.slice(i), ext, query, getDepth, setDepth); return out;
+      }
+    }
+    return out;
   }
+  if (cidx >= 0) { return highlightLine(line.slice(0,cidx), ext, query, getDepth, setDepth) + com(line.slice(cidx)); }
   // Tokenize
   let out = '';
   let i = 0; let buf = '';
@@ -169,6 +188,7 @@ function highlightLine(line, ext, query, getDepth, setDepth) {
     const lc = buf.toLowerCase();
     if (ext === 'py' && PY_KW.has(buf)) out += kw(buf);
     else if (ext === 'rs' && RS_KW.has(buf)) out += kw(buf);
+    else if (ext === 'js' && JS_KW.has(buf)) out += kw(buf);
     else if (lc === 'true' || lc === 'false' || lc === 'null' || lc === 'none') out += boolc(buf);
     else if (/^\d+$/.test(buf)) out += num(buf);
     else out += base(buf);
@@ -195,6 +215,7 @@ function highlightLine(line, ext, query, getDepth, setDepth) {
 
 const RS_KW = new Set(['as','async','await','break','const','continue','crate','dyn','else','enum','extern','false','fn','for','if','impl','in','let','loop','match','mod','move','mut','pub','ref','return','self','Self','static','struct','super','trait','true','type','unsafe','use','where','while','union','box','try','yield','macro','macro_rules']);
 const PY_KW = new Set(['False','None','True','and','as','assert','async','await','break','class','continue','def','del','elif','else','except','finally','for','from','global','if','import','in','is','lambda','nonlocal','not','or','pass','raise','return','try','while','with','yield','match','case']);
+const JS_KW = new Set(['function','const','let','var','class','extends','super','import','export','default','return','if','else','for','while','do','switch','case','break','continue','try','catch','finally','throw','new','this','in','of','await','async','yield','typeof','instanceof','void','delete','with']);
 
 function escapeHtml(s) { return s.replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
