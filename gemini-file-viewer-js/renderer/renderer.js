@@ -11,6 +11,8 @@ const imgEl = document.getElementById(''image'');
 const statusEl = document.getElementById(''status'');
 const findInput = document.getElementById(''find'');
 const matchesEl = document.getElementById(''matches'');
+const copyBtn = document.getElementById(''copy'');
+const revealBtn = document.getElementById(''reveal'');
 
 let currentPath = null;
 let currentExt = '';
@@ -231,3 +233,7 @@ function updateImageStatus() {
   const fitNote = fitChk.checked ? ' Fit: on' : '';
   statusEl.textContent = `${path} — ${natW}x${natH} px — Zoom: ${(eff*100).toFixed(0)}% — Texture ~${estMB} MB${fitNote}`;
 }
+
+// Copy/Open
+if (copyBtn) copyBtn.addEventListener('click', async () => { if (currentPath) { try { await window.api.copyText(currentPath); statusEl.textContent = 'Path copied to clipboard'; } catch {} } });
+if (revealBtn) revealBtn.addEventListener('click', () => { if (currentPath) window.api.revealInFolder(currentPath); });

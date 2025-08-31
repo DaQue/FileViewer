@@ -132,6 +132,11 @@ class MainWindow(QtWidgets.QMainWindow):
         tb.addSeparator()
         act_clear = tb.addAction("Clear")
         act_clear.triggered.connect(self.clear)
+        tb.addSeparator()
+        self.act_copy = tb.addAction("Copy Path")
+        self.act_copy.triggered.connect(self.copy_path)
+        self.act_open_folder = tb.addAction("Open Folder")
+        self.act_open_folder.triggered.connect(self.open_folder)
 
         self.status = self.statusBar()
 
@@ -231,6 +236,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.text.hide()
         self.image.hide()
         self.status.clearMessage()
+        self._update_actions_enabled()
 
     def load_path(self, path: Path):
         self._current_path = path
@@ -274,6 +280,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recents = self._recents[-10:]
         self.refresh_recents()
         self._save_settings()
+        self._update_actions_enabled()
 
     def refresh_recents(self):
         self.recent_menu.clear()
@@ -335,6 +342,37 @@ class MainWindow(QtWidgets.QMainWindow):
         est = (pix.width() * pix.height() * 4) / (1024*1024)
         extra = " Fit: on" if self.image.fit_to_window else ""
         self.status.showMessage(f"{self._current_path} — {pix.width()}x{pix.height()} px — Zoom: {eff*100:.0f}% — Texture ~{est:.1f} MB{extra}")
+        self._update_actions_enabled()
+
+    def _update_actions_enabled(self):
+        has_path = self._current_path is not None
+        self.act_copy.setEnabled(has_path)
+        self.act_open_folder.setEnabled(has_path)
+
+    def copy_path(self):
+        if not self._current_path:
+            return
+        QtWidgets.QApplication.clipboard().setText(str(self._current_path))
+        self.status.showMessage("Path copied to clipboard", 1500)
+
+    def open_folder(self):
+        if not self._current_path:
+            return
+        p = self._current_path
+        try:
+            if sys.platform.startswith('win'):
+                # Reveal in Explorer
+                import subprocess
+                subprocess.Popen(['explorer', '/select,', str(p)])
+            elif sys.platform == 'darwin':
+                import subprocess
+                subprocess.Popen(['open', '-R', str(p)])
+            else:
+                # Linux: open containing dir
+                import subprocess, os
+                subprocess.Popen(['xdg-open', str(p.parent)])
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Open Folder", f"Failed: {e}")
 
     def _ensure_settings_dir(self):
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
