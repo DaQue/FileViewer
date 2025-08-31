@@ -19,6 +19,7 @@
       #image { max-width: none; max-height: none; transform-origin: center center; }
       .hidden { display: none; }
       .match { background: rgba(255, 255, 0, 0.4); }
+      .match.current { outline: 2px solid #e06c75; }
     </style>
   </head>
   <body>
@@ -37,6 +38,8 @@
       <button id="copy">Copy Path</button>
       <button id="reveal">Open Folder</button>
       <label>Find: <input id="find" /></label>
+      <button id="prev">Prev</button>
+      <button id="next">Next</button>
       <span id="matches"></span>
     </div>
     <div id="content">

@@ -13,6 +13,8 @@ const findInput = document.getElementById(''find'');
 const matchesEl = document.getElementById(''matches'');
 const copyBtn = document.getElementById(''copy'');
 const revealBtn = document.getElementById(''reveal'');
+const prevBtn = document.getElementById(''prev'');
+const nextBtn = document.getElementById(''next'');
 
 let currentPath = null;
 let currentExt = '';
@@ -72,6 +74,7 @@ function updateImageTransform() {
     imgEl.style.transform = `scale(${imageZoom})`;
   }
   updateImageStatus();
+  try { const s = getSettings(); s.imageZoom = imageZoom; setSettings(s); } catch {}
 }
 
 fitChk.addEventListener('change', () => updateImageTransform());
@@ -93,6 +96,21 @@ findInput.addEventListener('input', () => {
     renderText(textEl.textContent, currentExt, findInput.value);
   }
 });
+
+// Find navigation
+let findIndex = 0;
+if (nextBtn) nextBtn.addEventListener('click', () => stepFind(1));
+if (prevBtn) prevBtn.addEventListener('click', () => stepFind(-1));
+findInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') stepFind(1); });
+
+function stepFind(dir) {
+  if (textEl.classList.contains('hidden')) return;
+  const matches = Array.from(textEl.querySelectorAll('.match'));
+  if (!matches.length) return;
+  findIndex = (findIndex + dir + matches.length) % matches.length;
+  matches.forEach(m => m.classList.remove('current'));
+  const el = matches[findIndex]; el.classList.add('current'); el.scrollIntoView({ block: 'center' });
+}
 
 function renderText(text, ext, query) {
   const lines = text.split("\n");

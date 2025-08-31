@@ -58,6 +58,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._settings_path = Path.home() / ".gemini_file_viewer_py" / "settings.json"
         self._dark_mode: bool = True
         self._wrap: bool = True
+        self._default_text_zoom: float = 1.0
+        self._default_image_zoom: float = 1.0
         self._ensure_settings_dir()
         self._load_settings()
 
@@ -65,8 +67,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scroll.setWidgetResizable(True)
         self.setCentralWidget(self.scroll)
 
-        self.text = QtWidgets.QPlainTextEdit()
+        self.text = NumberedPlainTextEdit()
         self.text.setReadOnly(True)
+        self._base_text_pt = self.text.font().pointSizeF() or 10.0
         self.text_zoom = 1.0
         self.highlighter = SimpleHighlighter(self.text.document())
 
@@ -149,6 +152,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.text.installEventFilter(self)
         self.image.installEventFilter(self)
+        # apply initial text zoom from settings
+        try:
+            self.apply_text_zoom(self.text_zoom)
+        except Exception:
+            pass
 
     def eventFilter(self, obj, ev):
         if obj is self.image and ev.type() == QtCore.QEvent.Wheel:
@@ -163,9 +171,8 @@ class MainWindow(QtWidgets.QMainWindow):
             delta = ev.angleDelta().y()
             if delta:
                 self.text_zoom = max(0.6, min(3.0, self.text_zoom * (1.05 if delta > 0 else 1/1.05)))
-                font = self.text.font()
-                font.setPointSizeF(font.pointSizeF() * (1.05 if delta > 0 else 1/1.05))
-                self.text.setFont(font)
+                self.apply_text_zoom(self.text_zoom)
+                self._save_settings()
                 return True
         return super().eventFilter(obj, ev)
 
@@ -256,6 +263,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 if pix.isNull():
                     raise RuntimeError("Failed to load image")
                 self.image.set_image(pix)
+                # apply persisted image zoom if not fitting
+                if not self.chk_fit.isChecked():
+                    self.image.zoom = max(0.1, min(6.0, float(getattr(self, '_default_image_zoom', 1.0))))
                 self.text.hide()
                 self.image.show()
                 self._update_image_status()
@@ -266,6 +276,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.text.setPlainText(text)
                 self.highlighter.set_language(ext)
                 self.apply_wrap(self._wrap)
+                # apply persisted text zoom
+                try:
+                    self.apply_text_zoom(float(getattr(self, '_default_text_zoom', 1.0)))
+                    self.text_zoom = float(getattr(self, '_default_text_zoom', 1.0))
+                except Exception:
+                    pass
                 self.text.show()
                 self.image.hide()
                 lines = text.count("\n") + 1 if text else 0
@@ -374,6 +390,15 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Open Folder", f"Failed: {e}")
 
+    def apply_text_zoom(self, factor: float):
+        try:
+            font = self.text.font()
+            base = getattr(self, '_base_text_pt', font.pointSizeF() or 10.0)
+            font.setPointSizeF(max(6.0, min(64.0, base * factor)))
+            self.text.setFont(font)
+        except Exception:
+            pass
+
     def _ensure_settings_dir(self):
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -392,6 +417,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 if ln is not None:
                     self.chk_ln.setChecked(bool(ln))
                     self.text.set_line_numbers_enabled(bool(ln))
+                self._default_text_zoom = float(obj.get("text_zoom", 1.0))
+                self._default_image_zoom = float(obj.get("image_zoom", 1.0))
+                self.text_zoom = self._default_text_zoom
         except Exception:
             self._recents = []
         finally:
@@ -406,6 +434,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 "fit": self.chk_fit.isChecked(),
                 "wrap": self._wrap,
                 "line_numbers": self.chk_ln.isChecked(),
+                "text_zoom": round(self.text_zoom, 3),
+                "image_zoom": round(self.image.zoom if hasattr(self.image, 'zoom') else 1.0, 3),
             }
             self._settings_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception:
@@ -481,6 +511,12 @@ class SimpleHighlighter(QtGui.QSyntaxHighlighter):
         for rx in (self.rules_py if self.lang == "py" else self.rules_rs if self.lang == "rs" else []):
             for m in rx.finditer(text):
                 self.setFormat(m.start(), m.end() - m.start(), kw_fmt)
+        # Numbers
+        num_fmt = QtGui.QTextCharFormat()
+        num_fmt.setForeground(QtGui.QColor(209, 154, 102))
+        import re as _re
+        for m in _re.finditer(r"\b\d+\b", text):
+            self.setFormat(m.start(), m.end() - m.start(), num_fmt)
 
     def _build_rules_py(self):
         import re

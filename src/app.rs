@@ -472,10 +472,20 @@ impl eframe::App for FileViewerApp {
                     if ui.button("Copy Path").on_hover_text("Copy path to clipboard").clicked() {
                         ui.ctx().copy_text(path.to_string_lossy().into());
                     }
-                    #[cfg(target_os = "windows")]
                     if ui.button("Open Folder").clicked() {
-                        if let Some(parent) = path.parent() {
-                            let _ = std::process::Command::new("explorer").arg(parent).spawn();
+                        #[cfg(target_os = "windows")]
+                        {
+                            let _ = std::process::Command::new("explorer").arg(path).spawn();
+                        }
+                        #[cfg(target_os = "macos")]
+                        {
+                            let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+                        }
+                        #[cfg(all(unix, not(target_os = "macos")))]
+                        {
+                            if let Some(parent) = path.parent() {
+                                let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+                            }
                         }
                     }
                 } else {
