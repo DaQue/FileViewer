@@ -35,6 +35,7 @@ pub struct FileViewerApp {
     image_zoom: f32,
     #[serde(skip)]
     show_about: bool,
+    image_fit: bool,
     // Derived/runtime-only state for text rendering
     #[serde(skip)]
     text_is_big: bool,
@@ -238,6 +239,7 @@ impl Default for FileViewerApp {
             text_zoom: 1.0,
             image_zoom: 1.0,
             show_about: false,
+            image_fit: false,
             text_is_big: false,
             text_line_count: 0,
             text_is_lossy: false,
@@ -299,6 +301,7 @@ impl eframe::App for FileViewerApp {
                         self.text_zoom = (self.text_zoom * factor).clamp(0.6, 3.0);
                     }
                     Some(Content::Image(_)) => {
+                        self.image_fit = false;
                         let factor = if dir > 0.0 { 1.10 } else { 1.0 / 1.10 };
                         self.image_zoom = (self.image_zoom * factor).clamp(0.1, 6.0);
                     }
@@ -310,21 +313,21 @@ impl eframe::App for FileViewerApp {
             if i.modifiers.command && i.key_pressed(egui::Key::Num0) {
                 match &self.content {
                     Some(Content::Text(_)) => self.text_zoom = 1.0,
-                    Some(Content::Image(_)) => self.image_zoom = 1.0,
+                    Some(Content::Image(_)) => { self.image_fit = false; self.image_zoom = 1.0; },
                     _ => {}
                 }
             }
             if i.modifiers.command && i.key_pressed(egui::Key::Equals) {
                 match &self.content {
                     Some(Content::Text(_)) => self.text_zoom = (self.text_zoom * 1.05).clamp(0.6, 3.0),
-                    Some(Content::Image(_)) => self.image_zoom = (self.image_zoom * 1.10).clamp(0.1, 6.0),
+                    Some(Content::Image(_)) => { self.image_fit = false; self.image_zoom = (self.image_zoom * 1.10).clamp(0.1, 6.0); },
                     _ => {}
                 }
             }
             if i.modifiers.command && i.key_pressed(egui::Key::Minus) {
                 match &self.content {
                     Some(Content::Text(_)) => self.text_zoom = (self.text_zoom / 1.05).clamp(0.6, 3.0),
-                    Some(Content::Image(_)) => self.image_zoom = (self.image_zoom / 1.10).clamp(0.1, 6.0),
+                    Some(Content::Image(_)) => { self.image_fit = false; self.image_zoom = (self.image_zoom / 1.10).clamp(0.1, 6.0); },
                     _ => {}
                 }
             }
@@ -413,6 +416,16 @@ impl eframe::App for FileViewerApp {
                     self.content = None;
                     self.current_path = None;
                     self.error_message = None;
+                }
+
+                // Image tools
+                if matches!(self.content, Some(Content::Image(_))) {
+                    ui.separator();
+                    ui.checkbox(&mut self.image_fit, "Fit to Window");
+                    if ui.button("100%").clicked() {
+                        self.image_fit = false;
+                        self.image_zoom = 1.0;
+                    }
                 }
             });
         });
@@ -541,7 +554,18 @@ impl eframe::App for FileViewerApp {
                         egui::ScrollArea::both().show(ui, |ui| {
                             ui.vertical_centered(|ui| {
                                 let size = texture.size();
-                                let desired = egui::vec2(size[0] as f32 * self.image_zoom, size[1] as f32 * self.image_zoom);
+                                let mut effective_zoom = self.image_zoom;
+                                if self.image_fit {
+                                        // Use clipped viewport size for more accurate fit in scroll area
+                                    let avail = ui.clip_rect().size();
+                                    let sx = if size[0] > 0 { avail.x / size[0] as f32 } else { 1.0 };
+                                    let sy = if size[1] > 0 { avail.y / size[1] as f32 } else { 1.0 };
+                                    let fit = sx.min(sy);
+                                    if fit.is_finite() && fit > 0.0 {
+                                        effective_zoom = fit.clamp(0.1, 6.0);
+                                    }
+                                }
+                                let desired = egui::vec2(size[0] as f32 * effective_zoom, size[1] as f32 * effective_zoom);
                                 ui.add_sized(desired, egui::Image::new(texture));
                             });
                         });
@@ -564,6 +588,97 @@ impl eframe::App for FileViewerApp {
     }
 }
 
+fn append_with_search(job: &mut LayoutJob, text: &str, font_id: egui::FontId, color: egui::Color32, query: &str) {
+    if query.is_empty() {
+        job.append(text, 0.0, egui::TextFormat { font_id, color, ..Default::default() });
+        return;
+    }
+    let lc_query = query.to_lowercase();
+    let mut rest = text;
+    let lc_rest_full = rest.to_lowercase();
+    let mut pos = 0usize;
+    while pos < lc_rest_full.len() {
+        if let Some(found) = lc_rest_full[pos..].find(&lc_query) {
+            let abs = pos + found;
+            let prefix = &rest[..abs];
+            if !prefix.is_empty() {
+                job.append(prefix, 0.0, egui::TextFormat { font_id: font_id.clone(), color, ..Default::default() });
+            }
+            let matched = &rest[abs..abs + lc_query.len()];
+            let mut fmt = egui::TextFormat { font_id: font_id.clone(), color, ..Default::default() };
+            fmt.background = egui::Color32::from_rgba_premultiplied(255, 255, 0, 64);
+            job.append(matched, 0.0, fmt);
+            rest = &rest[abs + lc_query.len()..];
+            pos = abs + lc_query.len();
+        } else {
+            if !rest.is_empty() {
+                job.append(rest, 0.0, egui::TextFormat { font_id, color, ..Default::default() });
+            }
+            break;
+        }
+    }
+}
+
+fn token_highlight(
+    job: &mut LayoutJob,
+    text: &str,
+    ext: &str,
+    font_id: egui::FontId,
+    base_color: egui::Color32,
+    query: &str,
+    do_syntax: bool,
+) {
+    if !do_syntax {
+        append_with_search(job, text, font_id, base_color, query);
+        return;
+    }
+    let kw_color = egui::Color32::from_rgb(97, 175, 239); // blue-ish
+    let num_color = egui::Color32::from_rgb(209, 154, 102); // orange-ish
+    let bool_color = egui::Color32::from_rgb(198, 120, 221); // purple-ish
+
+    let keywords_rs: &[&str] = &[
+        "fn","let","struct","impl","pub","use","mod","match","if","else","loop","while","for","return","enum","const","static","trait","where","crate","super","Self","self","type","as","mut","ref","in","break","continue"
+    ];
+
+    // Simple word tokenizer
+    let mut buf = String::new();
+    for ch in text.chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            buf.push(ch);
+        } else {
+            if !buf.is_empty() {
+                let lc = buf.to_lowercase();
+                let (color, _) = if ext == "rs" && keywords_rs.contains(&buf.as_str()) {
+                    (kw_color, true)
+                } else if lc == "true" || lc == "false" || lc == "null" { // json booleans
+                    (bool_color, true)
+                } else if buf.chars().all(|c| c.is_ascii_digit()) {
+                    (num_color, true)
+                } else {
+                    (base_color, false)
+                };
+                append_with_search(job, &buf, font_id.clone(), color, query);
+                buf.clear();
+            }
+            let delim = ch.to_string();
+            append_with_search(job, &delim, font_id.clone(), base_color, query);
+        }
+    }
+    if !buf.is_empty() {
+        let lc = buf.to_lowercase();
+        let (color, _) = if ext == "rs" && keywords_rs.contains(&buf.as_str()) {
+            (kw_color, true)
+        } else if lc == "true" || lc == "false" || lc == "null" {
+            (bool_color, true)
+        } else if buf.chars().all(|c| c.is_ascii_digit()) {
+            (num_color, true)
+        } else {
+            (base_color, false)
+        };
+        append_with_search(job, &buf, font_id, color, query);
+    }
+}
+
 fn append_highlighted(
     job: &mut LayoutJob,
     line: &str,
@@ -574,44 +689,34 @@ fn append_highlighted(
     do_syntax: bool,
 ) {
     // Very lightweight tokenization: comments, strings; plus search highlight
-    let mut buf = String::new();
-    let lc_query = query.to_lowercase();
-    let mut flush = |text: &str, color: egui::Color32, bg: Option<egui::Color32>| {
-        if text.is_empty() {
-            return;
-        }
-        let mut fmt = egui::TextFormat { font_id: font_id.clone(), color, ..Default::default() };
-        if let Some(bg) = bg {
-            fmt.background = bg;
-        }
-        job.append(text, 0.0, fmt);
-    };
-
-    // Comment split
+    // Handle comment split first to avoid borrow issues with inner closure.
     if do_syntax {
         let comment_prefix = if ext == "rs" { "//" } else if ext == "toml" { "#" } else { "" };
         if !comment_prefix.is_empty() {
             if let Some(pos) = line.find(comment_prefix) {
                 append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax);
-                flush(&line[pos..], egui::Color32::GRAY, None);
+                let mut fmt = egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() };
+                job.append(&line[pos..], 0.0, fmt);
                 return;
             }
         }
     }
+
+    let mut buf = String::new();
 
     // String literal coloring
     if do_syntax {
         let mut chars = line.chars().peekable();
         while let Some(ch) = chars.next() {
             if ch == '"' {
-                flush(&buf, base_color, None);
+                if !buf.is_empty() { token_highlight(job, &buf, ext, font_id.clone(), base_color, query, do_syntax); buf.clear(); }
                 buf.clear();
                 let mut s = String::from('"');
                 while let Some(c2) = chars.next() {
                     s.push(c2);
                     if c2 == '"' { break; }
                 }
-                flush(&s, egui::Color32::from_rgb(152, 195, 121), None);
+                append_with_search(job, &s, font_id.clone(), egui::Color32::from_rgb(152, 195, 121), query);
             } else {
                 buf.push(ch);
             }
@@ -620,27 +725,8 @@ fn append_highlighted(
         buf.push_str(line);
     }
 
-    // Apply search highlight within buf
-    if lc_query.is_empty() {
-        flush(&buf, base_color, None);
-    } else {
-        let mut rest = buf.as_str();
-        let lc_rest_full = rest.to_lowercase();
-        let mut pos = 0usize;
-        while pos < lc_rest_full.len() {
-            if let Some(found) = lc_rest_full[pos..].find(&lc_query) {
-                let abs = pos + found;
-                let prefix = &rest[..abs];
-                flush(prefix, base_color, None);
-                let matched = &rest[abs..abs + lc_query.len()];
-                flush(matched, base_color, Some(egui::Color32::from_rgba_premultiplied(255, 255, 0, 64)));
-                rest = &rest[abs + lc_query.len()..];
-                pos = abs + lc_query.len();
-            } else {
-                flush(rest, base_color, None);
-                break;
-            }
-        }
+    // Flush any remaining non-string content with token highlight
+    if !buf.is_empty() {
+        token_highlight(job, &buf, ext, font_id, base_color, query, do_syntax);
     }
 }
-
