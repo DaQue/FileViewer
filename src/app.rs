@@ -17,7 +17,7 @@ pub enum Content {
     Image(TextureHandle),
 }
 
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct FileViewerApp {
     #[serde(skip)]
@@ -39,6 +39,9 @@ impl FileViewerApp {
                     return app;
                 }
             }
+        }
+        if let Some(app) = Self::load_settings_from_disk() {
+            return app;
         }
         Default::default()
     }
@@ -113,8 +116,45 @@ impl FileViewerApp {
                     let overflow = self.recent_files.len() - MAX_RECENT_FILES;
                     self.recent_files.drain(0..overflow);
                 }
+                // Persist updated recents immediately
+                self.save_settings_to_disk();
             }
             Err(e) => self.error_message = Some(e),
+        }
+    }
+
+    fn settings_path() -> Option<PathBuf> {
+        directories::ProjectDirs::from("", "", "gemini-file-viewer")
+            .map(|dirs| dirs.config_dir().join("settings.json"))
+    }
+
+    fn load_settings_from_disk() -> Option<Self> {
+        let path = Self::settings_path()?;
+        let data = fs::read(&path).ok()?;
+        serde_json::from_slice::<Self>(&data).ok()
+    }
+
+    fn save_settings_to_disk(&self) {
+        if let Some(path) = Self::settings_path() {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Ok(s) = serde_json::to_vec_pretty(self) {
+                let _ = fs::write(path, s);
+            }
+        }
+    }
+}
+
+impl Default for FileViewerApp {
+    fn default() -> Self {
+        Self {
+            content: None,
+            current_path: None,
+            error_message: None,
+            dark_mode: true,
+            recent_files: Vec::new(),
+            show_line_numbers: true,
         }
     }
 }
@@ -124,6 +164,7 @@ impl eframe::App for FileViewerApp {
         if let Ok(s) = serde_json::to_string(self) {
             storage.set_string(eframe::APP_KEY, s);
         }
+        self.save_settings_to_disk();
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -151,17 +192,19 @@ impl eframe::App for FileViewerApp {
 
                 ui.menu_button("Recent Files", |ui| {
                     ui.set_min_width(480.0);
-                    ui.style_mut().wrap = Some(false);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                     if self.recent_files.is_empty() {
                         ui.label("(empty)");
                     }
                     for file in self.recent_files.iter().rev().cloned() {
-                        if let Some(file_name) = file.file_name() {
-                            let display = file.to_string_lossy();
-                            if ui.button(egui::RichText::new(display.clone()).monospace()).on_hover_text(file.to_string_lossy()).clicked() {
-                                file_to_load = Some(file);
-                                ui.close_menu();
-                            }
+                        let display = file.to_string_lossy();
+                        if ui
+                            .button(egui::RichText::new(display.clone()).monospace())
+                            .on_hover_text(display)
+                            .clicked()
+                        {
+                            file_to_load = Some(file);
+                            ui.close_menu();
                         }
                     }
                     ui.separator();
@@ -172,8 +215,13 @@ impl eframe::App for FileViewerApp {
                 });
 
                 ui.separator();
+                let prev_dark = self.dark_mode;
+                let prev_lines = self.show_line_numbers;
                 ui.checkbox(&mut self.dark_mode, "Dark Mode");
                 ui.checkbox(&mut self.show_line_numbers, "Line Numbers");
+                if self.dark_mode != prev_dark || self.show_line_numbers != prev_lines {
+                    self.save_settings_to_disk();
+                }
                 ui.separator();
 
                 if ui.button("Clear").clicked() {

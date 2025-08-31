@@ -20,4 +20,3 @@ fn main() -> Result<(), eframe::Error> {
         Box::new(|cc| Ok(Box::new(FileViewerApp::new(cc))))
     )
 }
-
