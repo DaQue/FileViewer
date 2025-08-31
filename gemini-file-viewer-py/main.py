@@ -54,6 +54,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._current_path: Path | None = None
         self._recents: list[Path] = []
+        self._settings_path = Path.home() / ".gemini_file_viewer_py" / "settings.json"
+        self._ensure_settings_dir()
+        self._load_settings()
 
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -62,6 +65,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.text = QtWidgets.QPlainTextEdit()
         self.text.setReadOnly(True)
         self.text_zoom = 1.0
+        self.highlighter = SimpleHighlighter(self.text.document())
 
         self.image = ImageView()
 
@@ -194,6 +198,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     data = f.read()
                 text = data.decode("utf-8", errors="replace")
                 self.text.setPlainText(text)
+                self.highlighter.set_language(ext)
                 self.text.show()
                 self.image.hide()
                 lines = text.count("\n") + 1 if text else 0
@@ -207,6 +212,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recents.append(path)
         self._recents = self._recents[-10:]
         self.refresh_recents()
+        self._save_settings()
 
     def refresh_recents(self):
         self.recent_menu.clear()
@@ -218,7 +224,10 @@ class MainWindow(QtWidgets.QMainWindow):
             act.triggered.connect(lambda checked=False, pp=p: self.load_path(pp))
         self.recent_menu.addSeparator()
         clear_act = self.recent_menu.addAction("Clear Recent Files")
-        clear_act.triggered.connect(lambda: self._recents.clear())
+        def _clear():
+            self._recents.clear()
+            self._save_settings()
+        clear_act.triggered.connect(_clear)
 
     def find_next(self):
         needle = self.find_edit.text()
@@ -241,6 +250,90 @@ class MainWindow(QtWidgets.QMainWindow):
         cnt = text.count(needle)
         self.find_count.setText(f"{cnt} match(es)")
 
+    def _ensure_settings_dir(self):
+        self._settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _load_settings(self):
+        try:
+            if self._settings_path.exists():
+                import json
+                obj = json.loads(self._settings_path.read_text(encoding="utf-8"))
+                rec = obj.get("recents", [])
+                self._recents = [Path(p) for p in rec if isinstance(p, str)]
+        except Exception:
+            self._recents = []
+        finally:
+            self.refresh_recents()
+
+    def _save_settings(self):
+        try:
+            import json
+            data = {"recents": [str(p) for p in self._recents[-10:]]}
+            self._settings_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+
+class SimpleHighlighter(QtGui.QSyntaxHighlighter):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.lang = ""
+        self.rules_py = self._build_rules_py()
+        self.rules_rs = self._build_rules_rs()
+
+    def set_language(self, ext: str):
+        self.lang = ext
+        self.rehighlight()
+
+    def highlightBlock(self, text: str) -> None:
+        # Strings
+        string_fmt = QtGui.QTextCharFormat()
+        string_fmt.setForeground(QtGui.QColor(152, 195, 121))
+        in_str = False
+        start = 0
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch == '"':
+                if not in_str:
+                    in_str = True
+                    start = i
+                else:
+                    self.setFormat(start, i - start + 1, string_fmt)
+                    in_str = False
+            i += 1
+        # Comments
+        comment_fmt = QtGui.QTextCharFormat()
+        comment_fmt.setForeground(QtGui.QColor('gray'))
+        if self.lang in ("py", "toml"):
+            idx = text.find('#')
+            if idx >= 0:
+                self.setFormat(idx, len(text) - idx, comment_fmt)
+        elif self.lang == "rs":
+            idx = text.find('//')
+            if idx >= 0:
+                self.setFormat(idx, len(text) - idx, comment_fmt)
+        # Keywords
+        kw_fmt = QtGui.QTextCharFormat()
+        kw_fmt.setForeground(QtGui.QColor(97, 175, 239))
+        for rx in (self.rules_py if self.lang == "py" else self.rules_rs if self.lang == "rs" else []):
+            for m in rx.finditer(text):
+                self.setFormat(m.start(), m.end() - m.start(), kw_fmt)
+
+    def _build_rules_py(self):
+        import re
+        kws = (
+            r"False|None|True|and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield|match|case"
+        )
+        return [re.compile(fr"\b({kws})\b")]
+
+    def _build_rules_rs(self):
+        import re
+        kws = (
+            r"as|async|await|break|const|continue|crate|dyn|else|enum|extern|false|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|true|type|unsafe|use|where|while|union|box|try|yield|macro|macro_rules"
+        )
+        return [re.compile(fr"\b({kws})\b")]
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
@@ -251,4 +344,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

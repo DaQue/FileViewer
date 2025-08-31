@@ -41,6 +41,21 @@ ipcMain.handle('dialog:open', async () => {
   }
 });
 
+ipcMain.handle('open:path', async (_e, filePath) => {
+  try {
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+    if (IMG_EXTS.has(ext)) {
+      return { path: filePath, kind: 'image' };
+    } else {
+      const data = await fs.readFile(filePath);
+      const text = new TextDecoder('utf-8', { fatal: false }).decode(data);
+      return { path: filePath, kind: 'text', text };
+    }
+  } catch (e) {
+    return { path: filePath, kind: 'error', error: String(e) };
+  }
+});
+
 app.whenReady().then(() => {
   createWindow();
   app.on('activate', () => {
@@ -51,4 +66,3 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-
