@@ -22,7 +22,7 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Gemini File Viewer 2.0",
         options,
-        Box::new(|_cc| Ok(Box::<FileViewerApp>::default()))
+        Box::new(|cc| Ok(Box::new(FileViewerApp::new(cc))))
     )
 }
 
@@ -33,10 +33,14 @@ enum Content {
 }
 
 // Main application state
-#[derive(Default)]
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 struct FileViewerApp {
+    #[serde(skip)]
     content: Option<Content>,
+    #[serde(skip)]
     current_path: Option<PathBuf>,
+    #[serde(skip)]
     error_message: Option<String>,
     dark_mode: bool,
     recent_files: Vec<PathBuf>,
@@ -44,6 +48,16 @@ struct FileViewerApp {
 }
 
 impl FileViewerApp {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        if let Some(storage) = cc.storage {
+            if let Some(s) = storage.get_string(eframe::APP_KEY) {
+                if let Ok(app) = serde_json::from_str::<FileViewerApp>(&s) {
+                    return app;
+                }
+            }
+        }
+        Default::default()
+    }
     // Handles loading a file (text or image)
     fn load_file(&mut self, path: PathBuf, ctx: &egui::Context) {
         // Clear previous state
@@ -102,6 +116,11 @@ impl FileViewerApp {
 
 // eframe::App implementation where the UI is defined
 impl eframe::App for FileViewerApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Ok(s) = serde_json::to_string(self) {
+            storage.set_string(eframe::APP_KEY, s);
+        }
+    }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_visuals(if self.dark_mode { egui::Visuals::dark() } else { egui::Visuals::light() });
 
