@@ -1,1 +1,6 @@
 /target
+# Ignore accidental device-name files on Windows
+CON
+PRN
+AUX
+NUL
