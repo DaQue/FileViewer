@@ -35,12 +35,14 @@ pub struct FileViewerApp {
     image_zoom: f32,
     #[serde(skip)]
     show_about: bool,
+    // Derived/runtime-only state for text rendering
     #[serde(skip)]
     text_is_big: bool,
     #[serde(skip)]
     text_line_count: usize,
     #[serde(skip)]
     text_is_lossy: bool,
+    // Simple find state
     #[serde(skip)]
     search_query: String,
     #[serde(skip)]
@@ -53,11 +55,24 @@ impl FileViewerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         if let Some(storage) = cc.storage
             && let Some(s) = storage.get_string(eframe::APP_KEY)
-            && let Ok(app) = serde_json::from_str::<FileViewerApp>(&s)
+            && let Ok(mut app) = serde_json::from_str::<FileViewerApp>(&s)
         {
+            // ensure runtime-only fields are initialized
+            app.text_is_big = false;
+            app.text_line_count = 0;
+            app.text_is_lossy = false;
+            app.search_query = String::new();
+            app.search_active = false;
+            app.search_count = 0;
             return app;
         }
-        if let Some(app) = Self::load_settings_from_disk() {
+        if let Some(mut app) = Self::load_settings_from_disk() {
+            app.text_is_big = false;
+            app.text_line_count = 0;
+            app.text_is_lossy = false;
+            app.search_query = String::new();
+            app.search_active = false;
+            app.search_count = 0;
             return app;
         }
         Default::default()
@@ -104,8 +119,11 @@ impl FileViewerApp {
     }
 
     fn load_image(&self, path: &Path) -> Result<ColorImage, String> {
+        // Pre-check dimensions to estimate texture memory before decoding
         if let Ok((w, h)) = image::image_dimensions(path) {
-            let est_bytes: usize = (w as usize).saturating_mul(h as usize).saturating_mul(4);
+            let est_bytes: usize = (w as usize)
+                .saturating_mul(h as usize)
+                .saturating_mul(4);
             if est_bytes > MAX_IMAGE_TEXTURE_BYTES {
                 return Err(format!(
                     "Image too large: {}x{} (~{:.1} MB RGBA). Limit ~{:.0} MB",
@@ -239,12 +257,12 @@ impl eframe::App for FileViewerApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Apply polished visuals and spacing (initial pass).
+        // Apply visuals each frame
         self.apply_theme(ctx);
 
         let mut file_to_load: Option<PathBuf> = None;
 
-        // Keyboard shortcuts and Ctrl+Wheel zoom
+        // Keyboard shortcuts
         let mut toggle_dark = false;
         ctx.input(|i| {
             if i.modifiers.command && i.key_pressed(egui::Key::O) {
@@ -287,6 +305,7 @@ impl eframe::App for FileViewerApp {
                     _ => {}
                 }
             }
+
             // Reset and keyboard zoom shortcuts
             if i.modifiers.command && i.key_pressed(egui::Key::Num0) {
                 match &self.content {
@@ -327,6 +346,9 @@ impl eframe::App for FileViewerApp {
                     ui.monospace("Ctrl+L — Toggle line numbers");
                     ui.monospace("Ctrl+W — Toggle word wrap");
                     ui.monospace("Ctrl+Wheel — Zoom text/image");
+                    ui.monospace("Ctrl+= / Ctrl+- — Zoom in/out");
+                    ui.monospace("Ctrl+0 — Reset zoom");
+                    ui.monospace("Ctrl+F — Find in text");
                 });
         }
         if toggle_dark {
@@ -339,7 +361,7 @@ impl eframe::App for FileViewerApp {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if ui
-                    .button(RichText::new("📂 Open File…"))
+                    .button(RichText::new("Open File"))
                     .clicked()
                     && let Some(path) = FileDialog::new()
                         .add_filter("All Supported", &["txt","rs","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
@@ -350,7 +372,7 @@ impl eframe::App for FileViewerApp {
                     file_to_load = Some(path);
                 }
 
-                ui.menu_button(RichText::new("🕘 Recent Files"), |ui| {
+                ui.menu_button(RichText::new("Recent Files"), |ui| {
                     ui.set_min_width(480.0);
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                     if self.recent_files.is_empty() {
@@ -368,7 +390,7 @@ impl eframe::App for FileViewerApp {
                         }
                     }
                     ui.separator();
-                    if ui.button("🧹 Clear Recent Files").clicked() {
+                    if ui.button("Clear Recent Files").clicked() {
                         self.recent_files.clear();
                         ui.close_menu();
                     }
@@ -377,10 +399,9 @@ impl eframe::App for FileViewerApp {
                 ui.separator();
                 let prev_dark = self.dark_mode;
                 let prev_lines = self.show_line_numbers;
-                ui.checkbox(&mut self.dark_mode, "🌙 Dark Mode");
-                ui.checkbox(&mut self.show_line_numbers, "🔢 Line Numbers");
+                ui.checkbox(&mut self.dark_mode, "Dark Mode");
+                ui.checkbox(&mut self.show_line_numbers, "Line Numbers");
                 if self.dark_mode != prev_dark {
-                    // Reapply theme immediately so toggle takes effect this frame.
                     self.apply_theme(ctx);
                 }
                 if self.dark_mode != prev_dark || self.show_line_numbers != prev_lines {
@@ -388,7 +409,7 @@ impl eframe::App for FileViewerApp {
                 }
                 ui.separator();
 
-                if ui.button("🧹 Clear").clicked() {
+                if ui.button("Clear").clicked() {
                     self.content = None;
                     self.current_path = None;
                     self.error_message = None;
@@ -427,7 +448,7 @@ impl eframe::App for FileViewerApp {
         egui::TopBottomPanel::bottom("statusbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if let Some(path) = &self.current_path {
-                    ui.monospace(format!("📄 {}", path.to_string_lossy()));
+                    ui.monospace(path.to_string_lossy());
                     if let Ok(metadata) = fs::metadata(path) {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(format!("({:.1} KB)", metadata.len() as f64 / 1024.0));
@@ -441,12 +462,6 @@ impl eframe::App for FileViewerApp {
                         if let Some(parent) = path.parent() {
                             let _ = std::process::Command::new("explorer").arg(parent).spawn();
                         }
-                    }
-                    if let Some(Content::Image(texture)) = &self.content {
-                        let size = texture.size();
-                        ui.separator();
-                        ui.label(format!("{}×{} px", size[0], size[1]));
-                        ui.label(format!("{:.0}%", self.image_zoom * 100.0));
                     }
                 } else {
                     ui.label("No file selected.");
@@ -502,7 +517,12 @@ impl eframe::App for FileViewerApp {
                                 let do_highlight = !self.text_is_big && text.len() <= HIGHLIGHT_CHAR_THRESHOLD;
                                 if do_line_numbers || do_highlight || !self.search_query.is_empty() {
                                     let mut job = LayoutJob::default();
-                                    let ext = self.current_path.as_ref().and_then(|p| p.extension().and_then(|s| s.to_str())).unwrap_or("").to_lowercase();
+                                    let ext = self
+                                        .current_path
+                                        .as_ref()
+                                        .and_then(|p| p.extension().and_then(|s| s.to_str()))
+                                        .unwrap_or("")
+                                        .to_lowercase();
                                     for (i, line) in text.lines().enumerate() {
                                         if do_line_numbers {
                                             job.append(&format!("{:>4} ", i + 1), 0.0, egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() });
@@ -530,7 +550,7 @@ impl eframe::App for FileViewerApp {
             } else if self.error_message.is_none() {
                 ui.vertical_centered(|ui| {
                     ui.add_space(ui.available_height() * 0.25);
-                    ui.label(RichText::new("✨ Gemini File Viewer").heading());
+                    ui.label(RichText::new("Gemini File Viewer").heading());
                     ui.add_space(6.0);
                     ui.label("Open a file to get started.");
                 });
@@ -553,9 +573,7 @@ fn append_highlighted(
     base_color: egui::Color32,
     do_syntax: bool,
 ) {
-    // Very lightweight tokenization: comments, strings, and a few keywords for rust/toml/json.
-    let mut idx = 0;
-    let mut in_string = false;
+    // Very lightweight tokenization: comments, strings; plus search highlight
     let mut buf = String::new();
     let lc_query = query.to_lowercase();
     let mut flush = |text: &str, color: egui::Color32, bg: Option<egui::Color32>| {
@@ -569,35 +587,39 @@ fn append_highlighted(
         job.append(text, 0.0, fmt);
     };
 
-    let comment_prefix = if ext == "rs" { "//" } else if ext == "toml" { "#" } else { "" };
-    if do_syntax && !comment_prefix.is_empty() {
-        if let Some(pos) = line.find(comment_prefix) {
-            // highlight before comment and then comment
-            append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax);
-            flush(&line[pos..], egui::Color32::GRAY, None);
-            return;
+    // Comment split
+    if do_syntax {
+        let comment_prefix = if ext == "rs" { "//" } else if ext == "toml" { "#" } else { "" };
+        if !comment_prefix.is_empty() {
+            if let Some(pos) = line.find(comment_prefix) {
+                append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax);
+                flush(&line[pos..], egui::Color32::GRAY, None);
+                return;
+            }
         }
     }
 
-    let mut chars = line.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if do_syntax && (ch == '"') {
-            // flush before string
-            flush(&buf, base_color, None);
-            buf.clear();
-            in_string = true;
-            let mut s = String::from("\"");
-            while let Some(c2) = chars.next() {
-                s.push(c2);
-                if c2 == '"' {
-                    break;
+    // String literal coloring
+    if do_syntax {
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '"' {
+                flush(&buf, base_color, None);
+                buf.clear();
+                let mut s = String::from('"');
+                while let Some(c2) = chars.next() {
+                    s.push(c2);
+                    if c2 == '"' { break; }
                 }
+                flush(&s, egui::Color32::from_rgb(152, 195, 121), None);
+            } else {
+                buf.push(ch);
             }
-            flush(&s, egui::Color32::from_rgb(152, 195, 121), None);
-            continue;
         }
-        buf.push(ch);
+    } else {
+        buf.push_str(line);
     }
+
     // Apply search highlight within buf
     if lc_query.is_empty() {
         flush(&buf, base_color, None);
@@ -610,16 +632,15 @@ fn append_highlighted(
                 let abs = pos + found;
                 let prefix = &rest[..abs];
                 flush(prefix, base_color, None);
-                // compute matched segment preserving case
                 let matched = &rest[abs..abs + lc_query.len()];
                 flush(matched, base_color, Some(egui::Color32::from_rgba_premultiplied(255, 255, 0, 64)));
                 rest = &rest[abs + lc_query.len()..];
                 pos = abs + lc_query.len();
             } else {
-                // remaining
                 flush(rest, base_color, None);
                 break;
             }
         }
     }
 }
+
