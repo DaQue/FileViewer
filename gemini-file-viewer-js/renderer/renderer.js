@@ -1,6 +1,7 @@
 ﻿const openBtn = document.getElementById(''open'');
 const recentSel = document.getElementById(''recent'');
 const fitChk = document.getElementById(''fit'');
+const wrapChk = document.getElementById(''wrap'');
 const darkChk = document.getElementById(''dark'');
 const zmMinus = document.getElementById(''zm-'');
 const zmPlus = document.getElementById(''zm+'');
@@ -29,9 +30,11 @@ async function handleOpenInfo(info) {
   if (info.kind === ''text'') {
     imgEl.classList.add(''hidden'');
     textEl.classList.remove(''hidden'');
-    statusEl.textContent = `${info.path} — ${info.text.split(/\n/).length} lines`;
+    statusEl.textContent = `${info.path} - ${info.text.split(/\n/).length} lines`;
     addRecent(info.path);
     renderText(info.text, currentExt, findInput.value);
+    // re-apply wrap on new content
+    const st = getSettings(); applyWrap(st.wrap !== false);
   } else if (info.kind === ''image'') {
     textEl.classList.add(''hidden'');
     imgEl.classList.remove(''hidden'');
@@ -201,8 +204,13 @@ function setSettings(obj) { localStorage.setItem('settings', JSON.stringify(obj)
 const settings = getSettings();
 const dark = !!settings.dark; applyDark(dark); if (darkChk) darkChk.checked = dark;
 const savedFit = !!settings.fit; if (fitChk) fitChk.checked = savedFit;
+const savedWrap = settings.wrap !== false; if (wrapChk) wrapChk.checked = savedWrap;
 if (darkChk) darkChk.addEventListener('change', () => { const s=getSettings(); s.dark=darkChk.checked; setSettings(s); applyDark(darkChk.checked); });
 if (fitChk) fitChk.addEventListener('change', () => { const s=getSettings(); s.fit=fitChk.checked; setSettings(s); });
+if (wrapChk) wrapChk.addEventListener('change', () => { const s=getSettings(); s.wrap=wrapChk.checked; setSettings(s); applyWrap(wrapChk.checked); });
+
+function applyWrap(on) { textEl.style.whiteSpace = on ? 'pre-wrap' : 'pre'; textEl.style.wordBreak = on ? 'break-word' : 'normal'; }
+applyWrap(savedWrap);
 
 function updateImageStatus() {
   if (imgEl.classList.contains(''hidden'')) return;

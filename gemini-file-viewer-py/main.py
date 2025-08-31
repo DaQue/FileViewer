@@ -57,6 +57,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recents: list[Path] = []
         self._settings_path = Path.home() / ".gemini_file_viewer_py" / "settings.json"
         self._dark_mode: bool = True
+        self._wrap: bool = True
         self._ensure_settings_dir()
         self._load_settings()
 
@@ -105,6 +106,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_dark.stateChanged.connect(self.toggle_dark)
         tb.addWidget(self.chk_dark)
         self.apply_theme(self._dark_mode)
+        tb.addSeparator()
+        self.chk_wrap = QtWidgets.QCheckBox("Word Wrap")
+        self.chk_wrap.setChecked(self._wrap)
+        self.chk_wrap.stateChanged.connect(self.toggle_wrap)
+        tb.addWidget(self.chk_wrap)
+        # apply initial wrap
+        self.apply_wrap(self._wrap)
         tb.addSeparator()
         self.chk_fit = QtWidgets.QCheckBox("Fit to Window")
         self.chk_fit.stateChanged.connect(self.toggle_fit)
@@ -173,6 +181,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.apply_theme(self._dark_mode)
         self._save_settings()
 
+    def toggle_wrap(self, state):
+        self._wrap = bool(state)
+        self.apply_wrap(self._wrap)
+        self._save_settings()
+
+    def apply_wrap(self, enabled: bool):
+        mode = QtWidgets.QPlainTextEdit.WidgetWidth if enabled else QtWidgets.QPlainTextEdit.NoWrap
+        self.text.setLineWrapMode(mode)
+
     def zoom_image(self, factor: float):
         if not self.image.isVisible():
             return
@@ -227,6 +244,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 text = data.decode("utf-8", errors="replace")
                 self.text.setPlainText(text)
                 self.highlighter.set_language(ext)
+                self.apply_wrap(self._wrap)
                 self.text.show()
                 self.image.hide()
                 lines = text.count("\n") + 1 if text else 0
@@ -315,6 +333,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._recents = [Path(p) for p in rec if isinstance(p, str)]
                 self._dark_mode = bool(obj.get("dark", True))
                 self.chk_fit.setChecked(bool(obj.get("fit", False)))
+                self._wrap = bool(obj.get("wrap", True))
                 self.apply_theme(self._dark_mode)
         except Exception:
             self._recents = []
@@ -328,6 +347,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "recents": [str(p) for p in self._recents[-10:]],
                 "dark": self._dark_mode,
                 "fit": self.chk_fit.isChecked(),
+                "wrap": self._wrap,
             }
             self._settings_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception:
