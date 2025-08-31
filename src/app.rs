@@ -33,12 +33,11 @@ pub struct FileViewerApp {
 
 impl FileViewerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        if let Some(storage) = cc.storage {
-            if let Some(s) = storage.get_string(eframe::APP_KEY) {
-                if let Ok(app) = serde_json::from_str::<FileViewerApp>(&s) {
-                    return app;
-                }
-            }
+        if let Some(storage) = cc.storage
+            && let Some(s) = storage.get_string(eframe::APP_KEY)
+            && let Ok(app) = serde_json::from_str::<FileViewerApp>(&s)
+        {
+            return app;
         }
         if let Some(app) = Self::load_settings_from_disk() {
             return app;
@@ -76,14 +75,14 @@ impl FileViewerApp {
         self.error_message = None;
         self.current_path = None;
 
-        if let Ok(metadata) = fs::metadata(&path) {
-            if metadata.len() > MAX_FILE_SIZE_BYTES {
-                self.error_message = Some(format!(
-                    "File is too large (> {:.1}MB)",
-                    MAX_FILE_SIZE_BYTES as f64 / 1_000_000.0
-                ));
-                return;
-            }
+        if let Ok(metadata) = fs::metadata(&path)
+            && metadata.len() > MAX_FILE_SIZE_BYTES
+        {
+            self.error_message = Some(format!(
+                "File is too large (> {:.1}MB)",
+                MAX_FILE_SIZE_BYTES as f64 / 1_000_000.0
+            ));
+            return;
         }
 
         let loaded = if Self::is_supported_image(&path) {
@@ -179,15 +178,14 @@ impl eframe::App for FileViewerApp {
         // Top Toolbar
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Open File…").clicked() {
-                    if let Some(path) = FileDialog::new()
+                if ui.button("Open File...").clicked()
+                    && let Some(path) = FileDialog::new()
                         .add_filter("All Supported", &["txt","rs","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
                         .add_filter("Images", &["png","jpg","jpeg","gif","bmp","webp"])
                         .add_filter("Text/Source", &["txt","rs","toml","md","json","js","html","css"])
                         .pick_file()
-                    {
-                        file_to_load = Some(path);
-                    }
+                {
+                    file_to_load = Some(path);
                 }
 
                 ui.menu_button("Recent Files", |ui| {

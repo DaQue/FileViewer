@@ -10,3 +10,12 @@ image = { version = "0.25.1", features = ["png", "jpeg", "gif", "bmp", "webp"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 directories = "5"
+
+[profile.release]
+# Smaller binary tweaks
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+# Strip symbols if supported by toolchain (Cargo >= 1.84)
+strip = true
