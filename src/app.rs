@@ -269,9 +269,9 @@ impl eframe::App for FileViewerApp {
         ctx.input(|i| {
             if i.modifiers.command && i.key_pressed(egui::Key::O) {
                 if let Some(path) = FileDialog::new()
-                    .add_filter("All Supported", &["txt","rs","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
+                    .add_filter("All Supported", &["txt","rs","py","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
                     .add_filter("Images", &["png","jpg","jpeg","gif","bmp","webp"])
-                    .add_filter("Text/Source", &["txt","rs","toml","md","json","js","html","css"])
+                    .add_filter("Text/Source", &["txt","rs","py","toml","md","json","js","html","css"])
                     .pick_file()
                 {
                     file_to_load = Some(path);
@@ -367,9 +367,9 @@ impl eframe::App for FileViewerApp {
                     .button(RichText::new("Open File"))
                     .clicked()
                     && let Some(path) = FileDialog::new()
-                        .add_filter("All Supported", &["txt","rs","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
+                        .add_filter("All Supported", &["txt","rs","py","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
                         .add_filter("Images", &["png","jpg","jpeg","gif","bmp","webp"])
-                        .add_filter("Text/Source", &["txt","rs","toml","md","json","js","html","css"])
+                        .add_filter("Text/Source", &["txt","rs","py","toml","md","json","js","html","css"])
                         .pick_file()
                 {
                     file_to_load = Some(path);
@@ -662,6 +662,9 @@ fn token_highlight(
     let keywords_rs: &[&str] = &[
         "fn","let","struct","impl","pub","use","mod","match","if","else","loop","while","for","return","enum","const","static","trait","where","crate","super","Self","self","type","as","mut","ref","in","break","continue"
     ];
+    let keywords_py: &[&str] = &[
+        "def","class","import","from","as","if","elif","else","for","while","return","try","except","finally","with","pass","break","continue","lambda","global","nonlocal","assert","yield","raise","in","is","and","or","not","True","False","None"
+    ];
 
     // Simple word tokenizer
     let mut buf = String::new();
@@ -672,6 +675,8 @@ fn token_highlight(
             if !buf.is_empty() {
                 let lc = buf.to_ascii_lowercase();
                 let (color, _) = if ext == "rs" && keywords_rs.contains(&buf.as_str()) {
+                    (kw_color, true)
+                } else if ext == "py" && keywords_py.contains(&buf.as_str()) {
                     (kw_color, true)
                 } else if lc == "true" || lc == "false" || lc == "null" { // json booleans
                     (bool_color, true)
@@ -704,6 +709,8 @@ fn token_highlight(
         let lc = buf.to_ascii_lowercase();
         let (color, _) = if ext == "rs" && keywords_rs.contains(&buf.as_str()) {
             (kw_color, true)
+        } else if ext == "py" && keywords_py.contains(&buf.as_str()) {
+            (kw_color, true)
         } else if lc == "true" || lc == "false" || lc == "null" {
             (bool_color, true)
         } else if buf.chars().all(|c| c.is_ascii_digit()) {
@@ -729,6 +736,7 @@ fn append_highlighted(
     // Handle comment split first to avoid borrow issues with inner closure.
     if do_syntax {
         let comment_prefix = if ext == "rs" { "//" } else if ext == "toml" { "#" } else { "" };
+        let comment_prefix = if ext == "py" { "#" } else { comment_prefix };
         if !comment_prefix.is_empty() {
             if let Some(pos) = line.find(comment_prefix) {
                 append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax, depth);
