@@ -1,5 +1,3 @@
-#![allow(clippy::needless_return)]
-
 use eframe::egui;
 use egui::{text::LayoutJob, ColorImage, RichText, TextureHandle};
 use image::GenericImageView;
@@ -11,6 +9,9 @@ use std::{
 
 const MAX_FILE_SIZE_BYTES: u64 = 10_000_000; // 10MB
 const MAX_RECENT_FILES: usize = 10;
+const BIG_TEXT_CHAR_THRESHOLD: usize = 500_000; // Disable heavy features beyond this
+const HIGHLIGHT_CHAR_THRESHOLD: usize = 200_000; // Disable syntax/mark highlights beyond this
+const MAX_IMAGE_TEXTURE_BYTES: usize = 128 * 1024 * 1024; // ~128 MB RGBA texture limit
 
 pub enum Content {
     Text(String),
@@ -34,6 +35,18 @@ pub struct FileViewerApp {
     image_zoom: f32,
     #[serde(skip)]
     show_about: bool,
+    #[serde(skip)]
+    text_is_big: bool,
+    #[serde(skip)]
+    text_line_count: usize,
+    #[serde(skip)]
+    text_is_lossy: bool,
+    #[serde(skip)]
+    search_query: String,
+    #[serde(skip)]
+    search_active: bool,
+    #[serde(skip)]
+    search_count: usize,
 }
 
 impl FileViewerApp {
@@ -82,12 +95,28 @@ impl FileViewerApp {
         matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp")
     }
 
-    fn load_text(&self, path: &Path) -> Result<String, String> {
+    fn load_text(&self, path: &Path) -> Result<(String, bool, usize), String> {
         let bytes = fs::read(path).map_err(|e| format!("Failed to read file: {}", e))?;
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        let lossy = text.contains('\u{FFFD}');
+        let lines = text.lines().count();
+        Ok((text, lossy, lines))
     }
 
     fn load_image(&self, path: &Path) -> Result<ColorImage, String> {
+        if let Ok((w, h)) = image::image_dimensions(path) {
+            let est_bytes: usize = (w as usize).saturating_mul(h as usize).saturating_mul(4);
+            if est_bytes > MAX_IMAGE_TEXTURE_BYTES {
+                return Err(format!(
+                    "Image too large: {}x{} (~{:.1} MB RGBA). Limit ~{:.0} MB",
+                    w,
+                    h,
+                    est_bytes as f64 / (1024.0 * 1024.0),
+                    MAX_IMAGE_TEXTURE_BYTES as f64 / (1024.0 * 1024.0)
+                ));
+            }
+        }
+
         let img = image::open(path).map_err(|e| format!("Failed to open image: {}", e))?;
         let (width, height) = img.dimensions();
         let rgba = img.to_rgba8();
@@ -127,7 +156,12 @@ impl FileViewerApp {
             }
         } else {
             match self.load_text(&path) {
-                Ok(text) => Ok(Content::Text(text)),
+                Ok((text, lossy, lines)) => {
+                    self.text_is_big = text.len() >= BIG_TEXT_CHAR_THRESHOLD || lines >= 50_000;
+                    self.text_line_count = lines;
+                    self.text_is_lossy = lossy;
+                    Ok(Content::Text(text))
+                }
                 Err(e) => Err(e),
             }
         };
@@ -186,6 +220,12 @@ impl Default for FileViewerApp {
             text_zoom: 1.0,
             image_zoom: 1.0,
             show_about: false,
+            text_is_big: false,
+            text_line_count: 0,
+            text_is_lossy: false,
+            search_query: String::new(),
+            search_active: false,
+            search_count: 0,
         }
     }
 }
@@ -220,6 +260,9 @@ impl eframe::App for FileViewerApp {
             if i.modifiers.command && i.key_pressed(egui::Key::D) {
                 toggle_dark = true;
             }
+            if i.modifiers.command && i.key_pressed(egui::Key::F) {
+                self.search_active = true;
+            }
             if i.modifiers.command && i.key_pressed(egui::Key::L) {
                 self.show_line_numbers = !self.show_line_numbers;
                 self.save_settings_to_disk();
@@ -241,6 +284,28 @@ impl eframe::App for FileViewerApp {
                         let factor = if dir > 0.0 { 1.10 } else { 1.0 / 1.10 };
                         self.image_zoom = (self.image_zoom * factor).clamp(0.1, 6.0);
                     }
+                    _ => {}
+                }
+            }
+            // Reset and keyboard zoom shortcuts
+            if i.modifiers.command && i.key_pressed(egui::Key::Num0) {
+                match &self.content {
+                    Some(Content::Text(_)) => self.text_zoom = 1.0,
+                    Some(Content::Image(_)) => self.image_zoom = 1.0,
+                    _ => {}
+                }
+            }
+            if i.modifiers.command && i.key_pressed(egui::Key::Equals) {
+                match &self.content {
+                    Some(Content::Text(_)) => self.text_zoom = (self.text_zoom * 1.05).clamp(0.6, 3.0),
+                    Some(Content::Image(_)) => self.image_zoom = (self.image_zoom * 1.10).clamp(0.1, 6.0),
+                    _ => {}
+                }
+            }
+            if i.modifiers.command && i.key_pressed(egui::Key::Minus) {
+                match &self.content {
+                    Some(Content::Text(_)) => self.text_zoom = (self.text_zoom / 1.05).clamp(0.6, 3.0),
+                    Some(Content::Image(_)) => self.image_zoom = (self.image_zoom / 1.10).clamp(0.1, 6.0),
                     _ => {}
                 }
             }
@@ -331,6 +396,33 @@ impl eframe::App for FileViewerApp {
             });
         });
 
+        // Search Bar (only when viewing text)
+        if matches!(self.content, Some(Content::Text(_))) {
+            egui::TopBottomPanel::top("searchbar").show(ctx, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Find:");
+                    let prev = self.search_query.clone();
+                    let resp = ui.text_edit_singleline(&mut self.search_query);
+                    if self.search_active {
+                        resp.request_focus();
+                        self.search_active = false;
+                    }
+                    if resp.changed() || (prev.is_empty() && !self.search_query.is_empty()) {
+                        self.search_count = 0;
+                        if let Some(Content::Text(ref text)) = self.content {
+                            if !self.search_query.is_empty() && text.len() <= HIGHLIGHT_CHAR_THRESHOLD {
+                                let needle = self.search_query.to_lowercase();
+                                self.search_count = text.to_lowercase().matches(&needle).count();
+                            }
+                        }
+                    }
+                    if !self.search_query.is_empty() {
+                        ui.label(format!("{} match(es)", self.search_count));
+                    }
+                });
+            });
+        }
+
         // Status Bar
         egui::TopBottomPanel::bottom("statusbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -362,6 +454,32 @@ impl eframe::App for FileViewerApp {
             });
         });
 
+        // Extra status information
+        egui::TopBottomPanel::bottom("status-extra").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                match &self.content {
+                    Some(Content::Image(texture)) => {
+                        let size = texture.size();
+                        ui.label(format!("Image: {}x{} px", size[0], size[1]));
+                        ui.label(format!("Zoom: {:.0}%", self.image_zoom * 100.0));
+                        let est = (size[0] as usize).saturating_mul(size[1] as usize).saturating_mul(4);
+                        ui.label(format!("Texture ~{:.1} MB", est as f64 / (1024.0 * 1024.0)));
+                    }
+                    Some(Content::Text(_)) => {
+                        ui.label(format!("Lines: {}", self.text_line_count));
+                        ui.label(format!("Zoom: {:.0}%", self.text_zoom * 100.0));
+                        if self.text_is_big {
+                            ui.label("Large file: reduced features");
+                        }
+                        if self.text_is_lossy {
+                            ui.label("UTF-8 (lossy)");
+                        }
+                    }
+                    _ => {}
+                }
+            });
+        });
+
         // Main Content
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(err) = &self.error_message {
@@ -379,11 +497,17 @@ impl eframe::App for FileViewerApp {
                                 let mut font_id = text_style.resolve(ui.style());
                                 font_id.size = (font_id.size * self.text_zoom).clamp(8.0, 48.0);
                                 let text_color = ui.visuals().text_color();
-                                if self.show_line_numbers {
+
+                                let do_line_numbers = self.show_line_numbers && !self.text_is_big;
+                                let do_highlight = !self.text_is_big && text.len() <= HIGHLIGHT_CHAR_THRESHOLD;
+                                if do_line_numbers || do_highlight || !self.search_query.is_empty() {
                                     let mut job = LayoutJob::default();
+                                    let ext = self.current_path.as_ref().and_then(|p| p.extension().and_then(|s| s.to_str())).unwrap_or("").to_lowercase();
                                     for (i, line) in text.lines().enumerate() {
-                                        job.append(&format!("{:>4} ", i + 1), 0.0, egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() });
-                                        job.append(line, 0.0, egui::TextFormat { font_id: font_id.clone(), color: text_color, ..Default::default() });
+                                        if do_line_numbers {
+                                            job.append(&format!("{:>4} ", i + 1), 0.0, egui::TextFormat { font_id: font_id.clone(), color: egui::Color32::GRAY, ..Default::default() });
+                                        }
+                                        append_highlighted(&mut job, line, &ext, &self.search_query, font_id.clone(), text_color, do_highlight);
                                         job.append("\n", 0.0, egui::TextFormat::default());
                                     }
                                     ui.label(job);
@@ -416,6 +540,86 @@ impl eframe::App for FileViewerApp {
         // Deferred file loading to avoid borrow issues
         if let Some(path) = file_to_load {
             self.load_file(path, ctx);
+        }
+    }
+}
+
+fn append_highlighted(
+    job: &mut LayoutJob,
+    line: &str,
+    ext: &str,
+    query: &str,
+    font_id: egui::FontId,
+    base_color: egui::Color32,
+    do_syntax: bool,
+) {
+    // Very lightweight tokenization: comments, strings, and a few keywords for rust/toml/json.
+    let mut idx = 0;
+    let mut in_string = false;
+    let mut buf = String::new();
+    let lc_query = query.to_lowercase();
+    let mut flush = |text: &str, color: egui::Color32, bg: Option<egui::Color32>| {
+        if text.is_empty() {
+            return;
+        }
+        let mut fmt = egui::TextFormat { font_id: font_id.clone(), color, ..Default::default() };
+        if let Some(bg) = bg {
+            fmt.background = bg;
+        }
+        job.append(text, 0.0, fmt);
+    };
+
+    let comment_prefix = if ext == "rs" { "//" } else if ext == "toml" { "#" } else { "" };
+    if do_syntax && !comment_prefix.is_empty() {
+        if let Some(pos) = line.find(comment_prefix) {
+            // highlight before comment and then comment
+            append_highlighted(job, &line[..pos], "", query, font_id.clone(), base_color, do_syntax);
+            flush(&line[pos..], egui::Color32::GRAY, None);
+            return;
+        }
+    }
+
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if do_syntax && (ch == '"') {
+            // flush before string
+            flush(&buf, base_color, None);
+            buf.clear();
+            in_string = true;
+            let mut s = String::from("\"");
+            while let Some(c2) = chars.next() {
+                s.push(c2);
+                if c2 == '"' {
+                    break;
+                }
+            }
+            flush(&s, egui::Color32::from_rgb(152, 195, 121), None);
+            continue;
+        }
+        buf.push(ch);
+    }
+    // Apply search highlight within buf
+    if lc_query.is_empty() {
+        flush(&buf, base_color, None);
+    } else {
+        let mut rest = buf.as_str();
+        let lc_rest_full = rest.to_lowercase();
+        let mut pos = 0usize;
+        while pos < lc_rest_full.len() {
+            if let Some(found) = lc_rest_full[pos..].find(&lc_query) {
+                let abs = pos + found;
+                let prefix = &rest[..abs];
+                flush(prefix, base_color, None);
+                // compute matched segment preserving case
+                let matched = &rest[abs..abs + lc_query.len()];
+                flush(matched, base_color, Some(egui::Color32::from_rgba_premultiplied(255, 255, 0, 64)));
+                rest = &rest[abs + lc_query.len()..];
+                pos = abs + lc_query.len();
+            } else {
+                // remaining
+                flush(rest, base_color, None);
+                break;
+            }
         }
     }
 }
