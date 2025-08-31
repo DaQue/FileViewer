@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>Gemini File Viewer (JS)</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
+      #toolbar { padding: 8px; border-bottom: 1px solid #ddd; display: flex; gap: 8px; align-items: center; }
+      #status { padding: 6px 8px; border-top: 1px solid #ddd; font-size: 12px; display: flex; gap: 12px; }
+      #content { flex: 1; overflow: auto; display: grid; place-items: center; }
+      #text { width: min(1200px, 100%); white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+      #image { max-width: none; max-height: none; transform-origin: center center; }
+      .hidden { display: none; }
+      .match { background: rgba(255, 255, 0, 0.4); }
+    </style>
+  </head>
+  <body>
+    <div id="toolbar">
+      <button id="open">Open…</button>
+      <div class="sep" style="width:1px;height:24px;background:#ddd"></div>
+      <label><input type="checkbox" id="fit" /> Fit to Window</label>
+      <button id="zm-">Zoom -</button>
+      <button id="zm+">Zoom +</button>
+      <button id="z100">100%</button>
+      <div style="flex:1"></div>
+      <label>Find: <input id="find" /></label>
+      <span id="matches"></span>
+    </div>
+    <div id="content">
+      <pre id="text" class="hidden"></pre>
+      <img id="image" class="hidden" />
+    </div>
+    <div id="status"></div>
+    <script src="renderer.js" type="module"></script>
+  </body>
+  </html>
+
