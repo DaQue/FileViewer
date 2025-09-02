@@ -2,21 +2,32 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; img-src 'self' file: data:; style-src 'self' 'unsafe-inline'" />
     <title>Gemini File Viewer (JS)</title>
     <style>
       :root { --bg:#fff; --fg:#111; --border:#ddd; --muted:#666; }
       body.dark { --bg:#1f1f1f; --fg:#e6e6e6; --border:#333; --muted:#9a9a9a; }
       html, body { height: 100%; margin: 0; }
       body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); }
-      #toolbar { padding: 8px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+      #toolbar { padding: 8px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       #toolbar input, #toolbar button, #toolbar select, #toolbar label { color: var(--fg); background: var(--bg); }
+      #toolbar button {
+        height: 28px;
+        padding: 0 8px;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      #toolbar label {
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+      }
       #status { padding: 6px 8px; border-top: 1px solid var(--border); font-size: 12px; display: flex; gap: 12px; color: var(--muted); }
-      #content { flex: 1; overflow: auto; display: grid; place-items: center; }
+      #content { flex: 1; overflow: auto; display: grid; place-items: start; }
       #text { width: min(1200px, 100%); white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
       .ln .gutter { color: var(--muted); display: inline-block; width: 48px; text-align: right; margin-right: 8px; user-select: none; }
       .ln-off .gutter { display: none; }
-      #image { max-width: none; max-height: none; transform-origin: center center; }
+      #image { display:block; max-width: none; max-height: none; }
       .hidden { display: none; }
       .match { background: rgba(255, 255, 0, 0.4); }
       .match.current { outline: 2px solid #e06c75; }
@@ -26,27 +37,32 @@
     <div id="toolbar">
       <button id="open">Open…</button>
       <label>Recent: <select id="recent"><option value="">(empty)</option></select></label>
+      <button id="clear-recents" title="Clear Recents (Shift+Delete)">Clear Recents</button>
       <div class="sep" style="width:1px;height:24px;background:#ddd"></div>
       <label><input type="checkbox" id="dark" /> Dark Mode</label>
-      <label><input type="checkbox" id="fit" /> Fit to Window</label>
       <label><input type="checkbox" id="wrap" /> Word Wrap</label>
       <label><input type="checkbox" id="linenumbers" /> Line Numbers</label>
       <button id="zm-">Zoom -</button>
       <button id="zm+">Zoom +</button>
       <button id="z100">100%</button>
+      <label><input type="checkbox" id="fit" /> Fit to Window</label>
+      <button id="clear">Clear</button>
       <div style="flex:1"></div>
       <button id="copy">Copy Path</button>
       <button id="reveal">Open Folder</button>
-      <label>Find: <input id="find" /></label>
-      <button id="prev">Prev</button>
-      <button id="next">Next</button>
-      <span id="matches"></span>
+      <span id="find-container" class="hidden">
+        <label>Find: <input id="find" /></label>
+        <button id="prev">Prev</button>
+        <button id="next">Next</button>
+        <span id="matches"></span>
+      </span>
     </div>
     <div id="content">
       <pre id="text" class="hidden"></pre>
       <img id="image" class="hidden" />
     </div>
     <div id="status"></div>
-    <script src="renderer.js" type="module"></script>
+    
+    <script src="renderer.js" defer></script>
   </body>
   </html>

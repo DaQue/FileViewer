@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, clipboard, shell } from 'electron';
+const { contextBridge, ipcRenderer, clipboard, shell } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   open: () => ipcRenderer.invoke('dialog:open'),

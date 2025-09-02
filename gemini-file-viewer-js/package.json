@@ -2,12 +2,48 @@
   "name": "gemini-file-viewer-js",
   "version": "0.1.0",
   "private": true,
+  "description": "Desktop file viewer for images and text (Electron).",
+  "author": "",
   "main": "main.js",
   "type": "module",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable",
+    "dist:nsis": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.david.geminifileviewer",
+    "productName": "Gemini File Viewer",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.cjs",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "GeminiFileViewer-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "GeminiFileViewer-Portable-${version}.exe"
+    }
   },
   "devDependencies": {
-    "electron": "^30.0.0"
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
   }
 }

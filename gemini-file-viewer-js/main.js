@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 
 const IMG_EXTS = new Set(['png','jpg','jpeg','gif','bmp','webp']);
 
@@ -9,15 +10,17 @@ async function createWindow() {
     width: 1000,
     height: 700,
     webPreferences: {
-      preload: path.join(process.cwd(), 'preload.js')
+      preload: path.join(process.cwd(), 'preload.cjs')
     },
     title: 'Gemini File Viewer (JS)'
   });
+
   await win.loadFile('renderer/index.html');
 }
 
 ipcMain.handle('dialog:open', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
+  const win = BrowserWindow.getFocusedWindow();
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     properties: ['openFile'],
     filters: [
       { name: 'All Supported', extensions: ['txt','rs','py','toml','md','json','js','html','css','png','jpg','jpeg','gif','bmp','webp'] },
@@ -29,7 +32,7 @@ ipcMain.handle('dialog:open', async () => {
   const filePath = filePaths[0];
   const ext = path.extname(filePath).slice(1).toLowerCase();
   if (IMG_EXTS.has(ext)) {
-    return { path: filePath, kind: 'image' };
+    return { path: filePath, url: String(pathToFileURL(filePath)), kind: 'image' };
   } else {
     try {
       const data = await fs.readFile(filePath);
@@ -45,7 +48,7 @@ ipcMain.handle('open:path', async (_e, filePath) => {
   try {
     const ext = path.extname(filePath).slice(1).toLowerCase();
     if (IMG_EXTS.has(ext)) {
-      return { path: filePath, kind: 'image' };
+      return { path: filePath, url: String(pathToFileURL(filePath)), kind: 'image' };
     } else {
       const data = await fs.readFile(filePath);
       const text = new TextDecoder('utf-8', { fatal: false }).decode(data);

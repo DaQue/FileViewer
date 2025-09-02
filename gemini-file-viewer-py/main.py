@@ -9,6 +9,98 @@ TXT_EXTS = {"txt", "rs", "py", "toml", "md", "json", "js", "html", "css"}
 MAX_IMAGE_TEXTURE_BYTES = 128 * 1024 * 1024  # ~128 MB RGBA
 
 
+class LineNumberArea(QtWidgets.QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.codeEditor = editor
+
+    def sizeHint(self):
+        return QtCore.QSize(self.codeEditor.lineNumberAreaWidth(), 0)
+
+    def paintEvent(self, event):
+        self.codeEditor.lineNumberAreaPaintEvent(event)
+
+
+class NumberedPlainTextEdit(QtWidgets.QPlainTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lineNumberArea = LineNumberArea(self)
+        self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
+        self.updateRequest.connect(self.updateLineNumberArea)
+        self.cursorPositionChanged.connect(self.highlightCurrentLine)
+        self._line_numbers_enabled = True
+
+        self.updateLineNumberAreaWidth(0)
+        self.highlightCurrentLine()
+
+    def set_line_numbers_enabled(self, enabled):
+        self._line_numbers_enabled = enabled
+        self.updateLineNumberAreaWidth(0)
+
+    def lineNumberAreaWidth(self):
+        if not self._line_numbers_enabled:
+            return 0
+        digits = 1
+        max_num = max(1, self.blockCount())
+        while max_num >= 10:
+            max_num //= 10
+            digits += 1
+        space = 3 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+
+    def updateLineNumberAreaWidth(self, _):
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+
+    def updateLineNumberArea(self, rect, dy):
+        if dy:
+            self.lineNumberArea.scroll(0, dy)
+        else:
+            self.lineNumberArea.update(0, rect.y(), self.lineNumberArea.width(), rect.height())
+
+        if rect.contains(self.viewport().rect()):
+            self.updateLineNumberAreaWidth(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.lineNumberArea.setGeometry(QtCore.QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
+
+    def lineNumberAreaPaintEvent(self, event):
+        if not self._line_numbers_enabled:
+            return
+        painter = QtGui.QPainter(self.lineNumberArea)
+        painter.fillRect(event.rect(), QtGui.QColor(240, 240, 240))
+
+        block = self.firstVisibleBlock()
+        blockNumber = block.blockNumber()
+        top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+        bottom = top + self.blockBoundingRect(block).height()
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(blockNumber + 1)
+                painter.setPen(QtCore.Qt.black)
+                painter.drawText(0, int(top), self.lineNumberArea.width(), self.fontMetrics().height(),
+                                 QtCore.Qt.AlignRight, number)
+
+            block = block.next()
+            top = bottom
+            bottom = top + self.blockBoundingRect(block).height()
+            blockNumber += 1
+
+    def highlightCurrentLine(self):
+        extraSelections = []
+        if not self.isReadOnly():
+            selection = QtWidgets.QTextEdit.ExtraSelection()
+            lineColor = QtGui.QColor(QtCore.Qt.yellow).lighter(160)
+            selection.format.setBackground(lineColor)
+            selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extraSelections.append(selection)
+        self.setExtraSelections(extraSelections)
+
+
 class ImageView(QtWidgets.QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -61,7 +153,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._default_text_zoom: float = 1.0
         self._default_image_zoom: float = 1.0
         self._ensure_settings_dir()
-        self._load_settings()
 
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -152,6 +243,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.text.installEventFilter(self)
         self.image.installEventFilter(self)
+        
+        self._load_settings()
+        
         # apply initial text zoom from settings
         try:
             self.apply_text_zoom(self.text_zoom)
