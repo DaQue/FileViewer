@@ -102,34 +102,46 @@ pub(crate) fn toolbar(ui: &mut egui::Ui, app: &mut crate::app::FileViewerApp, ct
             visuals.widgets.active.fg_stroke = Stroke::new(1.0, bg.gamma_multiply(0.6));
             style.visuals = visuals;
             ui.set_style(style);
+            let mut theme_changed = false;
             egui::ComboBox::from_id_source("theme_combo")
                 .selected_text(egui::RichText::new(format!("🎨 {}", app.theme.name())).color(text_color))
                 .show_ui(ui, |ui| {
                     use crate::app::Theme;
-                    ui.selectable_value(&mut app.theme, Theme::Light, "Light");
-                    ui.selectable_value(&mut app.theme, Theme::Dark, "Dark");
-                    ui.selectable_value(&mut app.theme, Theme::Allison, "Allison");
-                    ui.selectable_value(&mut app.theme, Theme::SolarizedLight, "Solarized Light");
-                    ui.selectable_value(&mut app.theme, Theme::SolarizedDark, "Solarized Dark");
-                    ui.selectable_value(&mut app.theme, Theme::Dracula, "Dracula");
-                    ui.selectable_value(&mut app.theme, Theme::GruvboxDark, "Gruvbox Dark");
-                    ui.selectable_value(&mut app.theme, Theme::Sepia, "Sepia");
+                    theme_changed |= ui.selectable_value(&mut app.theme, Theme::Light, "Light").changed();
+                    theme_changed |= ui.selectable_value(&mut app.theme, Theme::Dark, "Dark").changed();
+                    theme_changed |= ui.selectable_value(&mut app.theme, Theme::Allison, "Allison").changed();
+                    theme_changed |= ui.selectable_value(&mut app.theme, Theme::SolarizedLight, "Solarized Light").changed();
+                    theme_changed |= ui.selectable_value(&mut app.theme, Theme::SolarizedDark, "Solarized Dark").changed();
+                    theme_changed |= ui.selectable_value(&mut app.theme, Theme::Dracula, "Dracula").changed();
+                    theme_changed |= ui.selectable_value(&mut app.theme, Theme::GruvboxDark, "Gruvbox Dark").changed();
+                    theme_changed |= ui.selectable_value(&mut app.theme, Theme::Sepia, "Sepia").changed();
                 });
+            if theme_changed { app.follow_system_theme = false; }
+            ui.add_space(6.0);
+            ui.checkbox(&mut app.follow_system_theme, egui::RichText::new("Follow system").color(text_color));
+            ui.add_space(6.0);
+            if ui.add(egui::Button::new(egui::RichText::new("🎛 Theme").strong().color(text_color)).fill(bg).stroke(Stroke::new(1.0, bg.gamma_multiply(0.5)))).on_hover_text("Open Theme Editor").clicked() {
+                app.show_theme_editor = true;
+            }
         });
     } else {
+        let mut theme_changed = false;
         egui::ComboBox::from_id_source("theme_combo")
             .selected_text(format!("🎨 {}", app.theme.name()))
             .show_ui(ui, |ui| {
                 use crate::app::Theme;
-                ui.selectable_value(&mut app.theme, Theme::Light, "Light");
-                ui.selectable_value(&mut app.theme, Theme::Dark, "Dark");
-                ui.selectable_value(&mut app.theme, Theme::Allison, "Allison");
-                ui.selectable_value(&mut app.theme, Theme::SolarizedLight, "Solarized Light");
-                ui.selectable_value(&mut app.theme, Theme::SolarizedDark, "Solarized Dark");
-                ui.selectable_value(&mut app.theme, Theme::Dracula, "Dracula");
-                ui.selectable_value(&mut app.theme, Theme::GruvboxDark, "Gruvbox Dark");
-                ui.selectable_value(&mut app.theme, Theme::Sepia, "Sepia");
+                theme_changed |= ui.selectable_value(&mut app.theme, Theme::Light, "Light").changed();
+                theme_changed |= ui.selectable_value(&mut app.theme, Theme::Dark, "Dark").changed();
+                theme_changed |= ui.selectable_value(&mut app.theme, Theme::Allison, "Allison").changed();
+                theme_changed |= ui.selectable_value(&mut app.theme, Theme::SolarizedLight, "Solarized Light").changed();
+                theme_changed |= ui.selectable_value(&mut app.theme, Theme::SolarizedDark, "Solarized Dark").changed();
+                theme_changed |= ui.selectable_value(&mut app.theme, Theme::Dracula, "Dracula").changed();
+                theme_changed |= ui.selectable_value(&mut app.theme, Theme::GruvboxDark, "Gruvbox Dark").changed();
+                theme_changed |= ui.selectable_value(&mut app.theme, Theme::Sepia, "Sepia").changed();
             });
+        if theme_changed { app.follow_system_theme = false; }
+        ui.checkbox(&mut app.follow_system_theme, "Follow system");
+        if ui.button("🎛 Theme").on_hover_text("Open Theme Editor").clicked() { app.show_theme_editor = true; }
     }
     // Accent picker removed per request
 

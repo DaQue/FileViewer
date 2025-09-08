@@ -59,6 +59,8 @@ pub struct FileViewerApp {
     pub(crate) error_message: Option<String>,
     pub(crate) dark_mode: bool,
     pub(crate) theme: Theme,
+    #[serde(default = "default_follow_system_true")]
+    pub(crate) follow_system_theme: bool,
     pub(crate) recent_files: Vec<PathBuf>,
     pub(crate) show_line_numbers: bool,
     pub(crate) word_wrap: bool,
@@ -68,6 +70,12 @@ pub struct FileViewerApp {
     pub(crate) show_about: bool,
     pub(crate) image_fit: bool,
     pub(crate) accent_rgb: [u8; 3],
+    #[serde(default = "default_spacing_scale")]
+    pub(crate) spacing_scale: f32,
+    #[serde(default = "default_rounding")]
+    pub(crate) theme_rounding: u8,
+    #[serde(skip)]
+    pub(crate) show_theme_editor: bool,
     // Derived/runtime-only state for text rendering
     #[serde(skip)]
     pub(crate) text_is_big: bool,
@@ -103,6 +111,8 @@ impl FileViewerApp {
             if app.dark_mode != app.theme.is_dark() {
                 app.theme = if app.dark_mode { Theme::Dark } else { Theme::Light };
             }
+            if app.spacing_scale <= 0.0 { app.spacing_scale = default_spacing_scale(); }
+            if app.theme_rounding == 0 { app.theme_rounding = default_rounding(); }
             return app;
         }
         if let Some(mut app) = crate::settings::load_settings_from_disk() {
@@ -115,6 +125,8 @@ impl FileViewerApp {
             if app.dark_mode != app.theme.is_dark() {
                 app.theme = if app.dark_mode { Theme::Dark } else { Theme::Light };
             }
+            if app.spacing_scale <= 0.0 { app.spacing_scale = default_spacing_scale(); }
+            if app.theme_rounding == 0 { app.theme_rounding = default_rounding(); }
             return app;
         }
         Default::default()
@@ -141,10 +153,14 @@ impl FileViewerApp {
         };
 
         let mut style = (*ctx.style()).clone();
-        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        style.spacing.button_padding = egui::vec2(10.0, 6.0);
-        style.spacing.interact_size = egui::vec2(36.0, 28.0);
-        style.spacing.window_margin = egui::Margin::symmetric(12, 8);
+        let s = self.spacing_scale.max(0.5).min(2.0);
+        style.spacing.item_spacing = egui::vec2(8.0 * s, 6.0 * s);
+        style.spacing.button_padding = egui::vec2(10.0 * s, 6.0 * s);
+        style.spacing.interact_size = egui::vec2(36.0 * s, 28.0 * s);
+        let wm_x: i8 = (12.0 * s).round() as i8;
+        let wm_y: i8 = (8.0 * s).round() as i8;
+        style.spacing.window_margin = egui::Margin::symmetric(wm_x, wm_y);
+        // Global rounding is more limited in egui 0.31; skip if not available
         style.visuals = visuals;
         ctx.set_style(style);
     }
@@ -213,6 +229,7 @@ impl Default for FileViewerApp {
             error_message: None,
             dark_mode: true,
             theme: Theme::Dark,
+            follow_system_theme: true,
             recent_files: Vec::new(),
             show_line_numbers: true,
             word_wrap: true,
@@ -221,6 +238,9 @@ impl Default for FileViewerApp {
             show_about: false,
             image_fit: false,
             accent_rgb: [93, 156, 255],
+            spacing_scale: 1.0,
+            theme_rounding: 6,
+            show_theme_editor: false,
             text_is_big: false,
             text_line_count: 0,
             text_is_lossy: false,
@@ -241,6 +261,14 @@ impl eframe::App for FileViewerApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Follow system theme if enabled
+        if self.follow_system_theme {
+            let sys_dark = matches!(dark_light::detect(), Ok(dark_light::Mode::Dark));
+            if sys_dark != self.dark_mode {
+                self.dark_mode = sys_dark;
+                self.theme = if self.dark_mode { Theme::Dark } else { Theme::Light };
+            }
+        }
         // Apply visuals each frame
         self.apply_theme(ctx);
 
@@ -412,6 +440,7 @@ impl eframe::App for FileViewerApp {
         if toggle_dark {
             self.dark_mode = !self.dark_mode;
             self.theme = if self.dark_mode { Theme::Dark } else { Theme::Light };
+            self.follow_system_theme = false; // manual override
             self.apply_theme(ctx);
             crate::settings::save_settings_to_disk(self);
         }
@@ -439,6 +468,27 @@ impl eframe::App for FileViewerApp {
         egui::TopBottomPanel::bottom("status-extra").show(ctx, |ui| {
             crate::ui::status_extra(ui, self);
         });
+
+        // Theme Editor window
+        if self.show_theme_editor {
+            let mut open = self.show_theme_editor;
+            egui::Window::new("Theme Editor").open(&mut open).resizable(false).show(ctx, |ui| {
+                ui.heading("Theme & Layout");
+                ui.separator();
+                ui.checkbox(&mut self.follow_system_theme, "Follow system light/dark");
+                ui.horizontal(|ui| {
+                    ui.label("Accent color:");
+                    let mut srgba = egui::Color32::from_rgb(self.accent_rgb[0], self.accent_rgb[1], self.accent_rgb[2]);
+                    if ui.color_edit_button_srgba(&mut srgba).changed() {
+                        self.accent_rgb = [srgba.r(), srgba.g(), srgba.b()];
+                    }
+                });
+                ui.add(egui::Slider::new(&mut self.spacing_scale, 0.6..=1.6).text("Spacing scale"));
+                ui.add(egui::Slider::new(&mut self.theme_rounding, 0..=12).text("Corner radius"));
+                ui.label("Close this window using the × in the title bar.");
+            });
+            self.show_theme_editor = open;
+        }
 
         // Main Content
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -548,10 +598,24 @@ impl eframe::App for FileViewerApp {
                 }
             } else if self.error_message.is_none() {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(ui.available_height() * 0.25);
-                    ui.label(RichText::new("Gemini File Viewer").heading());
-                    ui.add_space(6.0);
+                    use egui::RichText as RT;
+                    ui.add_space(ui.available_height() * 0.20);
+                    ui.label(RT::new("🪐").size(48.0));
+                    ui.add_space(8.0);
+                    ui.label(RT::new("Gemini File Viewer").heading());
+                    ui.add_space(4.0);
                     ui.label("Open a file to get started.");
+                    ui.add_space(12.0);
+                    if ui.add(egui::Button::new("📂 Open a file (Ctrl+O)").min_size(egui::vec2(220.0, 36.0))).clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("All Supported", &["txt","rs","py","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
+                            .add_filter("Images", &["png","jpg","jpeg","gif","bmp","webp"])
+                            .add_filter("Text/Source", &["txt","rs","py","toml","md","json","js","html","css"])
+                            .pick_file()
+                        {
+                            file_to_load = Some(path);
+                        }
+                    }
                 });
             }
         });
@@ -614,3 +678,7 @@ fn load_custom_fonts(ctx: &egui::Context) {
 
     ctx.set_fonts(fonts);
 }
+
+fn default_follow_system_true() -> bool { true }
+fn default_spacing_scale() -> f32 { 1.0 }
+fn default_rounding() -> u8 { 6 }
