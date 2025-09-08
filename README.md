@@ -5,6 +5,7 @@ A lightweight desktop viewer for text/code and images, built with egui/eframe.
 Highlights
 - Modern UI: Top toolbar, search bar, and dual status bars.
 - Theming: Multiple light/dark themes (includes the "Allison" rainbow theme with colored toolbar controls).
+- System theme: Follows system light/dark automatically (can be overridden).
 - Text tools: Line numbers, word wrap, find with match count and navigation.
 - Image tools: Folder Prev/Next, Fit-to-viewport, zoom -, +, 100%, wheel zoom.
 - Drag & drop: Drop a file anywhere to open it.
@@ -15,9 +16,16 @@ Highlights
 
 New UI Details
 - Toolbar: Quick access to Open, Recent files, Theme, Line Numbers, and Clear.
+- Theme Editor: Open from the toolbar ("🎛 Theme"). Adjust accent color, spacing scale, and corner radius.
+- Follow System: Toggle near the theme selector; manual theme change disables follow-system.
 - Search Bar: Appears for text; supports Enter/Shift+Enter and Prev/Next with match counts.
 - Status Bars: Path + size with Copy Path and Open Folder, plus contextual info (image dimensions/zoom or text lines/zoom).
 - Keyboard: See shortcuts below; mouse wheel with Ctrl zooms text/images.
+
+Theming
+- Follows system light/dark by default and updates live.
+- Override by picking a theme from the combo or toggling dark mode (disables follow-system until re-enabled).
+- Open the Theme Editor from the toolbar to tweak accent color, spacing scale, and corner radius.
 
 Screenshots
 - Toolbar and theming:
@@ -97,3 +105,6 @@ Shortcuts
 - Ctrl+= / Ctrl+-: Zoom in/out
 - Ctrl+0: Reset zoom
 - < / >: Image prev/next (when viewing an image)
+ 
+Tips
+- Empty state includes an "Open file" button; you can also drag-and-drop a file anywhere.
