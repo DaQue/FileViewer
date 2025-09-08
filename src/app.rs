@@ -1,16 +1,15 @@
 use eframe::egui;
 use crate::highlight;
 use crate::search;
-use egui::{text::LayoutJob, ColorImage, RichText, TextureHandle};
-use std::fs;
+use egui::{text::LayoutJob, RichText, TextureHandle};
 use rfd::FileDialog;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 const MAX_FILE_SIZE_BYTES: u64 = 10_000_000; // 10MB
 const MAX_RECENT_FILES: usize = 10;
 const BIG_TEXT_CHAR_THRESHOLD: usize = 500_000; // Disable heavy features beyond this
 pub(crate) const HIGHLIGHT_CHAR_THRESHOLD: usize = 200_000; // Disable syntax/mark highlights beyond this
-const MAX_IMAGE_TEXTURE_BYTES: usize = 128 * 1024 * 1024; // ~128 MB RGBA texture limit
 
 pub enum Content {
     Text(String),
@@ -26,13 +25,14 @@ pub enum Theme {
     Dracula,
     GruvboxDark,
     Sepia,
+    Allison,
 }
 
 impl Default for Theme { fn default() -> Self { Theme::Dark } }
 
 impl Theme {
     pub fn is_dark(self) -> bool {
-        matches!(self, Theme::Dark | Theme::SolarizedDark | Theme::Dracula | Theme::GruvboxDark)
+        matches!(self, Theme::Dark | Theme::SolarizedDark | Theme::Dracula | Theme::GruvboxDark | Theme::Allison)
     }
     pub fn name(self) -> &'static str {
         match self {
@@ -43,6 +43,7 @@ impl Theme {
             Theme::Dracula => "Dracula",
             Theme::GruvboxDark => "Gruvbox Dark",
             Theme::Sepia => "Sepia",
+            Theme::Allison => "Allison",
         }
     }
 }
@@ -66,6 +67,7 @@ pub struct FileViewerApp {
     #[serde(skip)]
     pub(crate) show_about: bool,
     pub(crate) image_fit: bool,
+    pub(crate) accent_rgb: [u8; 3],
     // Derived/runtime-only state for text rendering
     #[serde(skip)]
     pub(crate) text_is_big: bool,
@@ -86,18 +88,18 @@ pub struct FileViewerApp {
 
 impl FileViewerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Load custom fonts if present (from Allison fork)
+        load_custom_fonts(&cc.egui_ctx);
         if let Some(storage) = cc.storage
             && let Some(s) = storage.get_string(eframe::APP_KEY)
             && let Ok(mut app) = serde_json::from_str::<FileViewerApp>(&s)
         {
-            // ensure runtime-only fields are initialized
             app.text_is_big = false;
             app.text_line_count = 0;
             app.text_is_lossy = false;
             app.search_query = String::new();
             app.search_active = false;
             app.search_count = 0;
-            // migration: keep theme in sync with legacy dark_mode
             if app.dark_mode != app.theme.is_dark() {
                 app.theme = if app.dark_mode { Theme::Dark } else { Theme::Light };
             }
@@ -119,36 +121,25 @@ impl FileViewerApp {
     }
 
     pub(crate) fn apply_theme(&self, ctx: &egui::Context) {
-        let mut visuals = if self.theme.is_dark() {
-            egui::Visuals::dark()
-        } else {
-            egui::Visuals::light()
-        };
+        let mut visuals = if self.theme.is_dark() { egui::Visuals::dark() } else { egui::Visuals::light() };
 
-        // Accent colors
-        visuals.selection.bg_fill = match self.theme {
-            Theme::Light => egui::Color32::from_rgb(0, 110, 230),
-            Theme::Dark => egui::Color32::from_rgb(80, 140, 255),
-            Theme::SolarizedLight => egui::Color32::from_rgb(38, 139, 210),
-            Theme::SolarizedDark => egui::Color32::from_rgb(38, 139, 210),
-            Theme::Dracula => egui::Color32::from_rgb(189, 147, 249),
-            Theme::GruvboxDark => egui::Color32::from_rgb(250, 189, 47),
-            Theme::Sepia => egui::Color32::from_rgb(181, 136, 99),
-        };
-        visuals.hyperlink_color = visuals.selection.bg_fill;
+        // Accent color override
+        let accent = egui::Color32::from_rgb(self.accent_rgb[0], self.accent_rgb[1], self.accent_rgb[2]);
+        visuals.selection.bg_fill = accent;
+        visuals.hyperlink_color = accent;
 
-        // Softer surfaces
+        // Panel fills by theme
         visuals.panel_fill = match self.theme {
             Theme::Light => egui::Color32::from_rgb(247, 247, 249),
             Theme::Dark => egui::Color32::from_rgb(22, 22, 24),
-            Theme::SolarizedLight => egui::Color32::from_rgb(253, 246, 227), // base3
-            Theme::SolarizedDark => egui::Color32::from_rgb(0, 43, 54),      // base03
+            Theme::SolarizedLight => egui::Color32::from_rgb(253, 246, 227),
+            Theme::SolarizedDark => egui::Color32::from_rgb(0, 43, 54),
             Theme::Dracula => egui::Color32::from_rgb(30, 31, 41),
             Theme::GruvboxDark => egui::Color32::from_rgb(40, 40, 40),
             Theme::Sepia => egui::Color32::from_rgb(247, 242, 231),
+            Theme::Allison => egui::Color32::from_rgb(24, 26, 30),
         };
 
-        // Start from current style, adjust spacing, then inject our visuals
         let mut style = (*ctx.style()).clone();
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         style.spacing.button_padding = egui::vec2(10.0, 6.0);
@@ -157,8 +148,6 @@ impl FileViewerApp {
         style.visuals = visuals;
         ctx.set_style(style);
     }
-
-    // io helpers moved to crate::io
 
     pub fn load_file(&mut self, path: PathBuf, ctx: &egui::Context) {
         self.content = None;
@@ -203,21 +192,17 @@ impl FileViewerApp {
             Ok(content) => {
                 self.content = Some(content);
                 self.current_path = Some(path.clone());
-                // Deduplicate and push to recents
                 self.recent_files.retain(|p| p != &path);
                 self.recent_files.push(path);
                 if self.recent_files.len() > MAX_RECENT_FILES {
                     let overflow = self.recent_files.len() - MAX_RECENT_FILES;
                     self.recent_files.drain(0..overflow);
                 }
-                // Persist updated recents immediately
                 crate::settings::save_settings_to_disk(self);
             }
             Err(e) => self.error_message = Some(e),
         }
     }
-
-    // settings helpers moved to crate::settings
 }
 
 impl Default for FileViewerApp {
@@ -235,6 +220,7 @@ impl Default for FileViewerApp {
             image_zoom: 1.0,
             show_about: false,
             image_fit: false,
+            accent_rgb: [93, 156, 255],
             text_is_big: false,
             text_line_count: 0,
             text_is_lossy: false,
@@ -259,6 +245,29 @@ impl eframe::App for FileViewerApp {
         self.apply_theme(ctx);
 
         let mut file_to_load: Option<PathBuf> = None;
+
+        // Drag & Drop: preview and open files
+        let hovered = ctx.input(|i| i.raw.hovered_files.clone());
+        if !hovered.is_empty() {
+            egui::Area::new("drop_hint".into())
+                .fixed_pos(egui::pos2(20.0, 20.0))
+                .order(egui::Order::Tooltip)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("Drop to open file").strong());
+                            if let Some(path) = hovered[0].path.as_ref() {
+                                ui.monospace(path.to_string_lossy());
+                            }
+                        });
+                });
+        }
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if let Some(df) = dropped.first() {
+            if let Some(path) = df.path.clone() {
+                file_to_load = Some(path);
+            }
+        }
 
         // Keyboard shortcuts
         let mut toggle_dark = false;
@@ -386,7 +395,7 @@ impl eframe::App for FileViewerApp {
                 .resizable(false)
                 .open(&mut self.show_about)
                 .show(ctx, |ui| {
-                    ui.label(RichText::new("Gemini File Viewer 2.0").strong());
+                    ui.label(RichText::new("Gemini File Viewer 2.1").strong());
                     ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
                     ui.separator();
                     ui.label("Shortcuts:");
@@ -441,11 +450,7 @@ impl eframe::App for FileViewerApp {
                 match content {
                     Content::Text(text) => {
                         let mut frame = egui::Frame::group(ui.style());
-                        frame.fill = if self.dark_mode {
-                            egui::Color32::from_rgb(28, 28, 30)
-                        } else {
-                            egui::Color32::from_rgb(255, 255, 255)
-                        };
+                        frame.fill = if self.dark_mode { egui::Color32::from_rgb(28, 28, 30) } else { egui::Color32::from_rgb(255, 255, 255) };
                         frame.inner_margin = egui::Margin::symmetric(12, 10);
                         frame = frame.corner_radius(egui::CornerRadius::same(8));
                         frame.show(ui, |ui| {
@@ -493,12 +498,32 @@ impl eframe::App for FileViewerApp {
                     }
                     Content::Image(texture) => {
                         let viewport = ui.available_size();
+                        // Checkerboard background
+                        let rect = ui.max_rect();
+                        let painter = ui.painter_at(rect);
+                        let size_cell = 12.0;
+                        let c1 = if ui.visuals().dark_mode { egui::Color32::from_gray(48) } else { egui::Color32::from_gray(220) };
+                        let c2 = if ui.visuals().dark_mode { egui::Color32::from_gray(60) } else { egui::Color32::from_gray(235) };
+                        let mut y = rect.top();
+                        let mut row = 0;
+                        while y < rect.bottom() {
+                            let mut x = rect.left();
+                            let mut col = 0;
+                            while x < rect.right() {
+                                let r = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(size_cell, size_cell));
+                                let color = if (row + col) % 2 == 0 { c1 } else { c2 };
+                                painter.rect_filled(r, 0.0, color);
+                                x += size_cell;
+                                col += 1;
+                            }
+                            y += size_cell;
+                            row += 1;
+                        }
                         egui::ScrollArea::both().show(ui, |ui| {
                             ui.centered_and_justified(|ui| {
                                 let size = texture.size();
                                 let mut effective_zoom = self.image_zoom;
                                 if self.image_fit {
-                                    // Use the outer viewport size captured before the ScrollArea
                                     let sx = if size[0] > 0 { viewport.x / size[0] as f32 } else { 1.0 };
                                     let sy = if size[1] > 0 { viewport.y / size[1] as f32 } else { 1.0 };
                                     let fit = sx.min(sy);
@@ -538,4 +563,54 @@ impl eframe::App for FileViewerApp {
     }
 }
 
+fn try_read(path: &Path) -> Option<Vec<u8>> { std::fs::read(path).ok() }
 
+fn load_custom_fonts(ctx: &egui::Context) {
+    use egui::{FontData, FontDefinitions, FontFamily};
+    let mut fonts = FontDefinitions::default();
+
+    // Candidate roots: CWD and executable dir
+    let mut roots: Vec<std::path::PathBuf> = vec![std::path::PathBuf::from(".")];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() { roots.push(dir.to_path_buf()); }
+    }
+
+    let font_paths = [
+        ("Inter-Regular", "assets/fonts/Inter-Regular.ttf"),
+        ("Inter-Medium", "assets/fonts/Inter-Medium.ttf"),
+        ("Inter-SemiBold", "assets/fonts/Inter-SemiBold.ttf"),
+        ("JetBrainsMono-Regular", "assets/fonts/JetBrainsMono-Regular.ttf"),
+        ("JetBrainsMono-Bold", "assets/fonts/JetBrainsMono-Bold.ttf"),
+    ];
+
+    for (key, rel) in font_paths {
+        let mut loaded: Option<Vec<u8>> = None;
+        for root in &roots {
+            let p = root.join(rel);
+            if let Some(bytes) = try_read(&p) {
+                loaded = Some(bytes);
+                break;
+            }
+        }
+        if let Some(bytes) = loaded {
+            fonts.font_data.insert(key.to_string(), FontData::from_owned(bytes).into());
+        }
+    }
+
+    // Prefer Inter for proportional text if present
+    if fonts.font_data.contains_key("Inter-Medium") || fonts.font_data.contains_key("Inter-Regular") {
+        let family = fonts.families.entry(FontFamily::Proportional).or_default();
+        if fonts.font_data.contains_key("Inter-SemiBold") { family.insert(0, "Inter-SemiBold".to_owned()); }
+        if fonts.font_data.contains_key("Inter-Medium") { family.insert(0, "Inter-Medium".to_owned()); }
+        if fonts.font_data.contains_key("Inter-Regular") { family.insert(0, "Inter-Regular".to_owned()); }
+    }
+
+    // Prefer JetBrains Mono for monospace if present
+    if fonts.font_data.contains_key("JetBrainsMono-Regular") {
+        let family = fonts.families.entry(FontFamily::Monospace).or_default();
+        if fonts.font_data.contains_key("JetBrainsMono-Bold") { family.insert(0, "JetBrainsMono-Bold".to_owned()); }
+        family.insert(0, "JetBrainsMono-Regular".to_owned());
+    }
+
+    ctx.set_fonts(fonts);
+}

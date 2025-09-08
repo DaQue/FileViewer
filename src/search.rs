@@ -28,4 +28,3 @@ pub(crate) fn find_target_line(text: &str, query: &str, target_idx: usize) -> Op
     }
     None
 }
-

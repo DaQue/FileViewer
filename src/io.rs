@@ -79,7 +79,6 @@ pub(crate) fn neighbor_image(path: &Path, forward: bool) -> Option<PathBuf> {
     };
     images.get(next_idx).cloned()
 }
-
 pub(crate) fn neighbor_text(path: &Path, forward: bool) -> Option<PathBuf> {
     let parent = path.parent()?;
     let mut texts: Vec<PathBuf> = std::fs::read_dir(parent).ok()?
@@ -98,4 +97,3 @@ pub(crate) fn neighbor_text(path: &Path, forward: bool) -> Option<PathBuf> {
     };
     texts.get(next_idx).cloned()
 }
-
