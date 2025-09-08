@@ -2,6 +2,12 @@
 
 A lightweight desktop viewer for text/code and images, built with egui/eframe.
 
+Project status
+- This is the master crate for all platforms (Linux and Windows). The older `gemini-file-viewer-linux` crate remains temporarily for reference and will be retired after Windows validation.
+
+Builds
+- See `BUILDING.md` for Linux builds and Windows cross‑compile (MSVC and GNU) instructions.
+
 ## Highlights
 - Persistent settings: Remembers Dark Mode, Line Numbers, and Recent Files across runs.
 - Recent Files: Wide, non-wrapping menu with a Clear option.

@@ -7,7 +7,8 @@ pub(crate) fn toolbar(ui: &mut egui::Ui, app: &mut crate::app::FileViewerApp, ct
     use egui::RichText;
 
     if ui
-        .button(RichText::new("Open File"))
+        .button(RichText::new("📂 Open").strong())
+        .on_hover_text("Open a file (Ctrl+O)")
         .clicked()
         && let Some(path) = FileDialog::new()
             .add_filter("All Supported", &["txt","rs","py","toml","md","json","js","html","css","png","jpg","jpeg","gif","bmp","webp"])
@@ -18,25 +19,26 @@ pub(crate) fn toolbar(ui: &mut egui::Ui, app: &mut crate::app::FileViewerApp, ct
         *file_to_load = Some(path);
     }
 
-    ui.menu_button(RichText::new("Recent Files"), |ui| {
+    ui.menu_button(RichText::new("🕘 Recent"), |ui| {
         ui.set_min_width(480.0);
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
         if app.recent_files.is_empty() {
             ui.label("(empty)");
         }
         for file in app.recent_files.clone().into_iter().rev() {
-            let display = file.to_string_lossy();
-            if ui
-                .button(egui::RichText::new(display.clone()).monospace())
-                .on_hover_text(display)
-                .clicked()
-            {
+            let name = file.file_name().and_then(|s| s.to_str()).unwrap_or("(unknown)");
+            let parent = file.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+            let btn = egui::RichText::new(name).strong();
+            if ui.button(btn).on_hover_text(parent.clone()).clicked() {
                 *file_to_load = Some(file);
                 ui.close_menu();
             }
+            if !parent.is_empty() {
+                ui.label(egui::RichText::new(parent).weak().small());
+            }
         }
         ui.separator();
-        if ui.button("Clear Recent Files").clicked() {
+        if ui.button("🧹 Clear Recent").clicked() {
             app.recent_files.clear();
             ui.close_menu();
         }
@@ -45,17 +47,42 @@ pub(crate) fn toolbar(ui: &mut egui::Ui, app: &mut crate::app::FileViewerApp, ct
     ui.separator();
     let prev_dark = app.dark_mode;
     let prev_lines = app.show_line_numbers;
-    ui.checkbox(&mut app.dark_mode, "Dark Mode");
-    ui.checkbox(&mut app.show_line_numbers, "Line Numbers");
+    // Theme selector
+    egui::ComboBox::from_id_source("theme_combo")
+        .selected_text(format!("🎨 {}", app.theme.name()))
+        .show_ui(ui, |ui| {
+            use crate::app::Theme;
+            ui.selectable_value(&mut app.theme, Theme::Light, "Light");
+            ui.selectable_value(&mut app.theme, Theme::Dark, "Dark");
+            ui.selectable_value(&mut app.theme, Theme::SolarizedLight, "Solarized Light");
+            ui.selectable_value(&mut app.theme, Theme::SolarizedDark, "Solarized Dark");
+            ui.selectable_value(&mut app.theme, Theme::Dracula, "Dracula");
+            ui.selectable_value(&mut app.theme, Theme::GruvboxDark, "Gruvbox Dark");
+            ui.selectable_value(&mut app.theme, Theme::Sepia, "Sepia");
+        });
+    // Quick toggle still available
+    ui.checkbox(&mut app.dark_mode, "Dark Mode").on_hover_text("Toggle theme (Ctrl+D)");
+    ui.checkbox(&mut app.show_line_numbers, "Line Numbers").on_hover_text("Toggle line numbers (Ctrl+L)");
     if app.dark_mode != prev_dark {
+        // Keep theme synced with quick toggle
+        app.theme = if app.dark_mode { crate::app::Theme::Dark } else { crate::app::Theme::Light };
         app.apply_theme(ctx);
     }
     if app.dark_mode != prev_dark || app.show_line_numbers != prev_lines {
         crate::settings::save_settings_to_disk(app);
     }
+    // Applying selected theme if changed via combobox
+    ui.ctx().style_mut(|_| {}); // force borrow split
+    // We update theme effects each frame; persist if changed
+    // Save whenever theme selection differs from prev_dark mapping
+    if app.dark_mode != app.theme.is_dark() {
+        app.dark_mode = app.theme.is_dark();
+        app.apply_theme(ctx);
+        crate::settings::save_settings_to_disk(app);
+    }
     ui.separator();
 
-    if ui.button("Clear").clicked() {
+    if ui.button("🗑️ Clear").on_hover_text("Clear current view").clicked() {
         app.content = None;
         app.current_path = None;
         app.error_message = None;
@@ -64,11 +91,34 @@ pub(crate) fn toolbar(ui: &mut egui::Ui, app: &mut crate::app::FileViewerApp, ct
     if matches!(app.content, Some(crate::app::Content::Image(_))) {
         ui.separator();
         let prev_fit = app.image_fit;
-        ui.checkbox(&mut app.image_fit, "Fit to Window");
+        if let Some(cur) = app.current_path.clone() {
+            if ui.button("Prev").clicked() {
+                if let Some(prev) = crate::io::neighbor_image(&cur, false) {
+                    *file_to_load = Some(prev);
+                }
+            }
+            if ui.button("Next").clicked() {
+                if let Some(next) = crate::io::neighbor_image(&cur, true) {
+                    *file_to_load = Some(next);
+                }
+            }
+            ui.separator();
+        }
+        ui.checkbox(&mut app.image_fit, "Fit to Window").on_hover_text("Scale image to fit the window");
         if app.image_fit != prev_fit { crate::settings::save_settings_to_disk(app); }
-        if ui.button("Zoom -").clicked() { app.image_fit = false; app.image_zoom = (app.image_zoom / 1.10).clamp(0.1, 6.0); }
-        if ui.button("Zoom +").clicked() { app.image_fit = false; app.image_zoom = (app.image_zoom * 1.10).clamp(0.1, 6.0); }
-        if ui.button("100%").clicked() { app.image_fit = false; app.image_zoom = 1.0; }
+        if ui.button("🔍−").on_hover_text("Zoom out").clicked() { app.image_fit = false; app.image_zoom = (app.image_zoom / 1.10).clamp(0.1, 6.0); }
+        if ui.button("🔍+").on_hover_text("Zoom in").clicked() { app.image_fit = false; app.image_zoom = (app.image_zoom * 1.10).clamp(0.1, 6.0); }
+        if ui.button("100%").on_hover_text("Reset zoom").clicked() { app.image_fit = false; app.image_zoom = 1.0; }
+    } else if matches!(app.content, Some(crate::app::Content::Text(_))) {
+        if let Some(cur) = app.current_path.clone() {
+            ui.separator();
+            if ui.button("Prev").clicked() {
+                if let Some(prev) = crate::io::neighbor_text(&cur, false) { *file_to_load = Some(prev); }
+            }
+            if ui.button("Next").clicked() {
+                if let Some(next) = crate::io::neighbor_text(&cur, true) { *file_to_load = Some(next); }
+            }
+        }
     }
 }
 
@@ -120,16 +170,16 @@ pub(crate) fn status_bar(ui: &mut egui::Ui, app: &mut crate::app::FileViewerApp)
     use std::fs;
     ui.horizontal(|ui| {
         if let Some(path) = &app.current_path {
-            ui.monospace(path.to_string_lossy());
+            ui.monospace(format!("📄 {}", path.to_string_lossy()));
             if let Ok(metadata) = fs::metadata(path) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(format!("({:.1} KB)", metadata.len() as f64 / 1024.0));
                 });
             }
-            if ui.button("Copy Path").on_hover_text("Copy path to clipboard").clicked() {
+            if ui.button("📋 Copy Path").on_hover_text("Copy path to clipboard").clicked() {
                 ui.ctx().copy_text(path.to_string_lossy().into());
             }
-            if ui.button("Open Folder").clicked() {
+            if ui.button("📂 Open Folder").clicked() {
                 #[cfg(target_os = "windows")]
                 { let _ = std::process::Command::new("explorer").arg(path).spawn(); }
                 #[cfg(target_os = "macos")]
@@ -148,18 +198,18 @@ pub(crate) fn status_extra(ui: &mut egui::Ui, app: &mut crate::app::FileViewerAp
         match &app.content {
             Some(crate::app::Content::Image(texture)) => {
                 let size = texture.size();
-                ui.label(format!("Image: {}x{} px", size[0], size[1]));
+                ui.label(format!("🖼️ {}x{} px", size[0], size[1]));
                 let eff = if app.image_fit { None } else { Some(app.image_zoom) };
-                if let Some(z) = eff { ui.label(format!("Zoom: {:.0}%", z * 100.0)); }
+                if let Some(z) = eff { ui.label(format!("🔍 {:.0}%", z * 100.0)); }
                 let est = (size[0] as usize).saturating_mul(size[1] as usize).saturating_mul(4);
-                ui.label(format!("Texture ~{:.1} MB", est as f64 / (1024.0 * 1024.0)));
+                ui.label(format!("🧮 ~{:.1} MB", est as f64 / (1024.0 * 1024.0)));
                 if app.image_fit { ui.label("Fit: on"); }
             }
             Some(crate::app::Content::Text(_)) => {
-                ui.label(format!("Lines: {}", app.text_line_count));
-                ui.label(format!("Zoom: {:.0}%", app.text_zoom * 100.0));
-                if app.text_is_big { ui.label("Large file: reduced features"); }
-                if app.text_is_lossy { ui.label("UTF-8 (lossy)"); }
+                ui.label(format!("📄 Lines: {}", app.text_line_count));
+                ui.label(format!("🔍 {:.0}%", app.text_zoom * 100.0));
+                if app.text_is_big { ui.label("⚠️ Large file: reduced features"); }
+                if app.text_is_lossy { ui.label("ℹ️ UTF-8 (lossy)"); }
             }
             _ => {}
         }

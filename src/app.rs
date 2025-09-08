@@ -17,6 +17,36 @@ pub enum Content {
     Image(TextureHandle),
 }
 
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum Theme {
+    Light,
+    Dark,
+    SolarizedLight,
+    SolarizedDark,
+    Dracula,
+    GruvboxDark,
+    Sepia,
+}
+
+impl Default for Theme { fn default() -> Self { Theme::Dark } }
+
+impl Theme {
+    pub fn is_dark(self) -> bool {
+        matches!(self, Theme::Dark | Theme::SolarizedDark | Theme::Dracula | Theme::GruvboxDark)
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Theme::Light => "Light",
+            Theme::Dark => "Dark",
+            Theme::SolarizedLight => "Solarized Light",
+            Theme::SolarizedDark => "Solarized Dark",
+            Theme::Dracula => "Dracula",
+            Theme::GruvboxDark => "Gruvbox Dark",
+            Theme::Sepia => "Sepia",
+        }
+    }
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct FileViewerApp {
@@ -27,6 +57,7 @@ pub struct FileViewerApp {
     #[serde(skip)]
     pub(crate) error_message: Option<String>,
     pub(crate) dark_mode: bool,
+    pub(crate) theme: Theme,
     pub(crate) recent_files: Vec<PathBuf>,
     pub(crate) show_line_numbers: bool,
     pub(crate) word_wrap: bool,
@@ -66,6 +97,10 @@ impl FileViewerApp {
             app.search_query = String::new();
             app.search_active = false;
             app.search_count = 0;
+            // migration: keep theme in sync with legacy dark_mode
+            if app.dark_mode != app.theme.is_dark() {
+                app.theme = if app.dark_mode { Theme::Dark } else { Theme::Light };
+            }
             return app;
         }
         if let Some(mut app) = crate::settings::load_settings_from_disk() {
@@ -75,30 +110,50 @@ impl FileViewerApp {
             app.search_query = String::new();
             app.search_active = false;
             app.search_count = 0;
+            if app.dark_mode != app.theme.is_dark() {
+                app.theme = if app.dark_mode { Theme::Dark } else { Theme::Light };
+            }
             return app;
         }
         Default::default()
     }
 
     pub(crate) fn apply_theme(&self, ctx: &egui::Context) {
-        let mut visuals = if self.dark_mode {
+        let mut visuals = if self.theme.is_dark() {
             egui::Visuals::dark()
         } else {
             egui::Visuals::light()
         };
 
         // Accent colors
-        visuals.selection.bg_fill = if self.dark_mode {
-            egui::Color32::from_rgb(80, 140, 255)
-        } else {
-            egui::Color32::from_rgb(0, 110, 230)
+        visuals.selection.bg_fill = match self.theme {
+            Theme::Light => egui::Color32::from_rgb(0, 110, 230),
+            Theme::Dark => egui::Color32::from_rgb(80, 140, 255),
+            Theme::SolarizedLight => egui::Color32::from_rgb(38, 139, 210),
+            Theme::SolarizedDark => egui::Color32::from_rgb(38, 139, 210),
+            Theme::Dracula => egui::Color32::from_rgb(189, 147, 249),
+            Theme::GruvboxDark => egui::Color32::from_rgb(250, 189, 47),
+            Theme::Sepia => egui::Color32::from_rgb(181, 136, 99),
         };
         visuals.hyperlink_color = visuals.selection.bg_fill;
+
+        // Softer surfaces
+        visuals.panel_fill = match self.theme {
+            Theme::Light => egui::Color32::from_rgb(247, 247, 249),
+            Theme::Dark => egui::Color32::from_rgb(22, 22, 24),
+            Theme::SolarizedLight => egui::Color32::from_rgb(253, 246, 227), // base3
+            Theme::SolarizedDark => egui::Color32::from_rgb(0, 43, 54),      // base03
+            Theme::Dracula => egui::Color32::from_rgb(30, 31, 41),
+            Theme::GruvboxDark => egui::Color32::from_rgb(40, 40, 40),
+            Theme::Sepia => egui::Color32::from_rgb(247, 242, 231),
+        };
 
         // Start from current style, adjust spacing, then inject our visuals
         let mut style = (*ctx.style()).clone();
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         style.spacing.button_padding = egui::vec2(10.0, 6.0);
+        style.spacing.interact_size = egui::vec2(36.0, 28.0);
+        style.spacing.window_margin = egui::Margin::symmetric(12, 8);
         style.visuals = visuals;
         ctx.set_style(style);
     }
@@ -172,6 +227,7 @@ impl Default for FileViewerApp {
             current_path: None,
             error_message: None,
             dark_mode: true,
+            theme: Theme::Dark,
             recent_files: Vec::new(),
             show_line_numbers: true,
             word_wrap: true,
@@ -271,6 +327,56 @@ impl eframe::App for FileViewerApp {
                     _ => {}
                 }
             }
+
+            // Navigation with arrow keys for current content type
+            if i.key_pressed(egui::Key::ArrowRight) {
+                if let Some(cur) = self.current_path.clone() {
+                    match self.content {
+                        Some(Content::Image(_)) => {
+                            if let Some(next) = crate::io::neighbor_image(&cur, true) { file_to_load = Some(next); }
+                        }
+                        Some(Content::Text(_)) => {
+                            if let Some(next) = crate::io::neighbor_text(&cur, true) { file_to_load = Some(next); }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if i.key_pressed(egui::Key::ArrowLeft) {
+                if let Some(cur) = self.current_path.clone() {
+                    match self.content {
+                        Some(Content::Image(_)) => {
+                            if let Some(prev) = crate::io::neighbor_image(&cur, false) { file_to_load = Some(prev); }
+                        }
+                        Some(Content::Text(_)) => {
+                            if let Some(prev) = crate::io::neighbor_text(&cur, false) { file_to_load = Some(prev); }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Support '<' and '>' typed keys for both images and text
+            for ev in &i.events {
+                if let egui::Event::Text(t) = ev {
+                    if t == ">" {
+                        if let Some(cur) = self.current_path.clone() {
+                            match self.content {
+                                Some(Content::Image(_)) => { if let Some(next) = crate::io::neighbor_image(&cur, true) { file_to_load = Some(next); } }
+                                Some(Content::Text(_)) => { if let Some(next) = crate::io::neighbor_text(&cur, true) { file_to_load = Some(next); } }
+                                _ => {}
+                            }
+                        }
+                    } else if t == "<" {
+                        if let Some(cur) = self.current_path.clone() {
+                            match self.content {
+                                Some(Content::Image(_)) => { if let Some(prev) = crate::io::neighbor_image(&cur, false) { file_to_load = Some(prev); } }
+                                Some(Content::Text(_)) => { if let Some(prev) = crate::io::neighbor_text(&cur, false) { file_to_load = Some(prev); } }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
         });
 
         // About dialog
@@ -296,6 +402,7 @@ impl eframe::App for FileViewerApp {
         }
         if toggle_dark {
             self.dark_mode = !self.dark_mode;
+            self.theme = if self.dark_mode { Theme::Dark } else { Theme::Light };
             self.apply_theme(ctx);
             crate::settings::save_settings_to_disk(self);
         }
@@ -333,7 +440,15 @@ impl eframe::App for FileViewerApp {
             if let Some(content) = &self.content {
                 match content {
                     Content::Text(text) => {
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                        let mut frame = egui::Frame::group(ui.style());
+                        frame.fill = if self.dark_mode {
+                            egui::Color32::from_rgb(28, 28, 30)
+                        } else {
+                            egui::Color32::from_rgb(255, 255, 255)
+                        };
+                        frame.inner_margin = egui::Margin::symmetric(12, 10);
+                        frame = frame.corner_radius(egui::CornerRadius::same(8));
+                        frame.show(ui, |ui| {
                             // Wrap preference
                             ui.style_mut().wrap_mode = Some(if self.word_wrap { egui::TextWrapMode::Wrap } else { egui::TextWrapMode::Extend });
                             egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
