@@ -7,3 +7,4 @@ NUL
 # JavaScript build artifacts
 gemini-file-viewer-js/node_modules/
 gemini-file-viewer-js/dist/
+*.tar.gz
